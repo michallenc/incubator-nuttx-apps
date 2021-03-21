@@ -1,5 +1,5 @@
 ############################################################################
-# testing/irtest/Makefile
+# apps/examples/rpmsgsocket/Makefile
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -20,12 +20,11 @@
 
 include $(APPDIR)/Make.defs
 
-PROGNAME  = $(CONFIG_TESTING_IRTEST_PROGNAME)
-PRIORITY  = $(CONFIG_TESTING_IRTEST_PRIORITY)
-STACKSIZE = $(CONFIG_TESTING_IRTEST_STACKSIZE)
-MODULE    = $(CONFIG_TESTING_IRTEST)
+MAINSRC = rpsock_client.c rpsock_server.c
 
-MAINSRC   = main.cxx
-CXXSRCS   = $(filter-out $(MAINSRC), $(wildcard *.cxx))
+PROGNAME = rpsock_client rpsock_server
+PRIORITY = SCHED_PRIORITY_DEFAULT
+STACKSIZE = $(CONFIG_DEFAULT_TASK_STACKSIZE)
+MODULE = $(CONFIG_EXAMPLES_RPMSGSOCKET)
 
 include $(APPDIR)/Application.mk

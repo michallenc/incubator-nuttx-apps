@@ -1,5 +1,5 @@
 /****************************************************************************
- * apps/examples/watched/watched.h
+ * apps/system/i2c/i2c_reset.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,62 +18,48 @@
  *
  ****************************************************************************/
 
-#ifndef __EXAMPLES_WATCHER_WATCHED_H
-#define __EXAMPLES_WATCHER_WATCHED_H
-
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <signal.h>
+
+#include <nuttx/i2c/i2c_master.h>
+
+#include "i2ctool.h"
 
 /****************************************************************************
- * Pre-processor Definitions
+ * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Public Types
+ * Name: i2ccmd_reset
  ****************************************************************************/
 
-struct watcher_info_s
+int i2ccmd_reset(FAR struct i2ctool_s *i2ctool, int argc, char **argv)
 {
-    int sub_cmd;
-    int unsub_cmd;
-    int feed_cmd;
-    int signal;
-    pid_t watcher_pid;
-    const char info_file_name[];
-};
+  int ret;
+  int fd;
 
-struct request_s
-{
-    pid_t task_id;
-    volatile int code;
-};
+  /* Get a handle to the I2C bus */
 
-struct watched_info_s
-{
-    struct request_s sub_request;
-    struct request_s unsub_request;
-    struct request_s feed_request;
-    union sigval sub_value;
-    union sigval unsub_value;
-    union sigval feed_value;
-};
+  fd = i2cdev_open(i2ctool->bus);
+  if (fd < 0)
+    {
+      i2ctool_printf(i2ctool, "Failed to get bus %d\n", i2ctool->bus);
+      return ERROR;
+    }
 
-/****************************************************************************
- * Public Data
- ****************************************************************************/
+  ret = i2cdev_reset(fd);
+  if (ret == OK)
+    {
+      i2ctool_printf(i2ctool, "Reset command sent successfully\n");
+    }
+  else
+    {
+      i2ctool_printf(i2ctool, "Failed to send the reset command\n");
+    }
 
-/****************************************************************************
- * Public Function Prototypes
- ****************************************************************************/
+  return ret;
+}
 
-bool watched_is_watcher_on(void);
-int  watched_read_watcher_info(struct watched_info_s *info);
-int  watched_subscribe(struct watched_info_s *info);
-int  watched_unsubscribe(struct watched_info_s *info);
-int  watched_feed_dog(struct watched_info_s *info);
-
-#endif                                 /* __EXAMPLES_WATCHER_WATCHED_H */
