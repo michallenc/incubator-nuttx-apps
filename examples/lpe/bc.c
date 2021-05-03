@@ -50,12 +50,12 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <debug.h>
-#include <pthread.h>
 
 #include <nuttx/analog/adc.h>
 #include <nuttx/analog/ioctl.h>
 #include <nuttx/video/fb.h>
 #include <nuttx/video/rgbcolors.h>
+#include <pthread.h>
 
 #include "lpe.h"
 
@@ -77,10 +77,13 @@
 
 #define NCOLORS 6
 
+uint32_t sampled_data[1024];
 int tmp = 0;
 
+static struct adc_state_s g_adcstate;
+
 static const char g_default_fbdev[] = CONFIG_EXAMPLES_FB_DEFAULTFB;
-uint32_t sampled_data[230];
+
 static const uint16_t g_rgb16[NCOLORS] =
 {
   RGB16_VIOLET, RGB16_BLUE, RGB16_GREEN,
@@ -102,7 +105,8 @@ struct fb_state_s my_state;
 
 typedef struct data {
     int stop_flag; //indicates if the program is running or not;
-    int to_sent; //last received letter
+    char last_sent; //last received letter
+    uint32_t samples[1024];
     pthread_cond_t output_condvar;
     pthread_mutex_t mtx;
 } data_t;
@@ -115,6 +119,7 @@ typedef struct data {
   size_t readsize;
   ssize_t nbytes;
   int fd;
+  int errval = 0;
   int ret;
 
 /****************************************************************************
@@ -175,12 +180,11 @@ static void draw_rect16(FAR struct fb_state_s *state2,
 void *adc_thread(void* arg)
 {
   data_t *data = (data_t*)arg;
-  int errval;
-  struct fb_area_s area;
   struct adc_msg_s sample[CONFIG_EXAMPLES_LPE_GROUPSIZE];
+  struct fb_area_s area;
   while (data->stop_flag == 0)
   {
-    //fflush(stdout);
+    fflush(stdout);
 
 #ifdef CONFIG_EXAMPLES_LPE_SWTRIG
     /* Issue the software trigger to start ADC conversion */
@@ -205,7 +209,8 @@ void *adc_thread(void* arg)
         errval = errno;
         if (errval != EINTR)
           {
-            printf("adc_main: read failed: %d\n", errval);
+            printf("adc_main: read %s failed: %d\n",
+                   g_adcstate.devpath, errval);
             errval = 3;
           }
 
@@ -231,13 +236,11 @@ void *adc_thread(void* arg)
           {
            for (int i = 0; i < nsamples; i++)
             {
-              //sampled_data[tmp] = sample[i].am_data;
               sampled_data[tmp] = sample[i].am_data;
               tmp +=1;
             }
             if (tmp == 210)
               {
-                //data->to_sent = 1;
                 area.x = 0;
                 area.y = 0;
                 area.w = 176;
@@ -251,7 +254,7 @@ void *adc_thread(void* arg)
                     area.y = j;
                     //printf("(%ld , %d )\n", area.x, area.y);
                     area.w = 10;
-                    area.h = 5;
+                    area.h = 10;
                     draw_rect16(&my_state, &area, 2);
                   }
                 tmp = 0;
@@ -274,8 +277,9 @@ int main(int argc, FAR char *argv[])
 {
 
   /* Check if we have initialized */
-  static struct adc_state_s g_adcstate;
+
   FAR const char *fbdev = g_default_fbdev;
+
   if (!g_adcstate.initialized)
     {
       /* Initialization of the ADC hardware must be performed by
@@ -375,7 +379,7 @@ int main(int argc, FAR char *argv[])
   if (fd < 0)
     {
       printf("adc_main: open %s failed: %d\n", g_adcstate.devpath, errno);
-      int errval = 2;
+      errval = 2;
     }
 
   /* Now loop the appropriate number of times, displaying the collected
@@ -383,8 +387,12 @@ int main(int argc, FAR char *argv[])
    */
 
   data_t shared_data;
-  shared_data.stop_flag = 0;
-  shared_data.to_sent = 0;
+  shared_data.stop_flag = false;
+  shared_data.last_sent = '?';
+  for (int i = 0;i<1024;i++)
+  {
+    shared_data.samples[i] = 0;
+  }
   if (pthread_mutex_init(&shared_data.mtx, NULL)) {
         fprintf(stderr, "ERROR: Could not initialize mutex.\n");
   }
@@ -396,13 +404,13 @@ int main(int argc, FAR char *argv[])
     ADC_THREAD,
     NUM_THREADS
   };
-  const char* thread_names[] = {"ADC"};
+  const char* thread_names[] = {"ADC", "FB"};
   void* (*thd_functions[])(void*) = {
       adc_thread,
      };
   pthread_t threads[NUM_THREADS]; //array of threads
 
-  for(int i = 0; i < NUM_THREADS; ++i)
+  for(int i = 0; i < NUM_THREADS; ++i) 
     { //start the threads
       int check = pthread_create(&threads[i], NULL, thd_functions[i], &shared_data);
       fprintf(stderr, "INFO: %s thread start: %s\r\n",

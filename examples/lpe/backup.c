@@ -1,5 +1,5 @@
 /****************************************************************************
- * examples/lpe/lpe_main.c
+ * examples/adc/adc_main.c
  *
  *   Copyright (C) 2011-2012, 2015, 2017 Gregory Nutt. All rights reserved.
  *   Author: Gregory Nutt <gnutt@nuttx.org>
@@ -50,7 +50,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <debug.h>
-#include <pthread.h>
 
 #include <nuttx/analog/adc.h>
 #include <nuttx/analog/ioctl.h>
@@ -77,10 +76,13 @@
 
 #define NCOLORS 6
 
+uint32_t sampled_data[1024];
 int tmp = 0;
 
+static struct adc_state_s g_adcstate;
+
 static const char g_default_fbdev[] = CONFIG_EXAMPLES_FB_DEFAULTFB;
-uint32_t sampled_data[230];
+
 static const uint16_t g_rgb16[NCOLORS] =
 {
   RGB16_VIOLET, RGB16_BLUE, RGB16_GREEN,
@@ -97,25 +99,6 @@ struct fb_state_s
 #endif
   FAR void *fbmem;
 };
-
-struct fb_state_s my_state;
-
-typedef struct data {
-    int stop_flag; //indicates if the program is running or not;
-    int to_sent; //last received letter
-    pthread_cond_t output_condvar;
-    pthread_mutex_t mtx;
-} data_t;
-
-  int nsteps;
-  int xstep;
-  int ystep;
-  int width;
-  int height;
-  size_t readsize;
-  ssize_t nbytes;
-  int fd;
-  int ret;
 
 /****************************************************************************
  * Public Data
@@ -143,25 +126,30 @@ static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath)
   adc->devpath = strdup(devpath);
 }
 
-static void draw_rect16(FAR struct fb_state_s *state2,
+static void draw_rect16(FAR struct fb_state_s *state,
                         FAR struct fb_area_s *area, int color)
 {
   FAR uint16_t *dest;
   FAR uint8_t *row;
+  int x;
+  int y;
+  #ifdef CONFIG_FB_UPDATE
+  int ret;
+  #endif
 
-  row = (FAR uint8_t *)state2->fbmem + state2->pinfo.stride * area->y;
-  for (int y = 0; y < area->h; y++)
+  row = (FAR uint8_t *)state->fbmem + state->pinfo.stride * area->y;
+  for (y = 0; y < area->h; y++)
     {
       dest = ((FAR uint16_t *)row) + area->x;
-      for (int x = 0; x < area->w; x++)
+      for (x = 0; x < area->w; x++)
         {
           *dest++ = g_rgb16[color];
         }
 
-      row += state2->pinfo.stride;
+      row += state->pinfo.stride;
     }
   #ifdef CONFIG_FB_UPDATE
-  ret = ioctl(state2->fd, FBIO_UPDATE,
+  ret = ioctl(state->fd, FBIO_UPDATE,
               (unsigned long)((uintptr_t)area));
   if (ret < 0)
     {
@@ -172,94 +160,31 @@ static void draw_rect16(FAR struct fb_state_s *state2,
   #endif
 }
 
-void *adc_thread(void* arg)
+static void draw_rect16b(FAR struct fb_state_s *state,
+                        FAR struct fb_area_s *area, int color)
 {
-  data_t *data = (data_t*)arg;
-  int errval;
-  struct fb_area_s area;
-  struct adc_msg_s sample[CONFIG_EXAMPLES_LPE_GROUPSIZE];
-  while (data->stop_flag == 0)
-  {
-    //fflush(stdout);
+  FAR uint16_t *dest;
+  FAR uint8_t *row;
+  int x;
+  int y;
+  #ifdef CONFIG_FB_UPDATE
+  int ret;
+  #endif
 
-#ifdef CONFIG_EXAMPLES_LPE_SWTRIG
-    /* Issue the software trigger to start ADC conversion */
+  row = (FAR uint8_t *)state->fbmem + state->pinfo.stride * area->y;
+  dest = ((FAR uint16_t *)row) + area->x;
+  *dest = g_rgb16[color];
 
-    ret = ioctl(fd, ANIOC_TRIGGER, 0);
-    if (ret < 0)
-      {
-        int errcode = errno;
-        printf("adc_main: ANIOC_TRIGGER ioctl failed: %d\n", errcode);
-      }
-#endif
-
-    /* Read up to CONFIG_EXAMPLES_LPE_GROUPSIZE samples */
-
-    readsize = CONFIG_EXAMPLES_LPE_GROUPSIZE * sizeof(struct adc_msg_s);
-    nbytes = read(fd, sample, readsize);
-
-    /* Handle unexpected return values */
-    
-    if (nbytes < 0)
-      {
-        errval = errno;
-        if (errval != EINTR)
-          {
-            printf("adc_main: read failed: %d\n", errval);
-            errval = 3;
-          }
-
-        printf("adc_main: Interrupted read...\n");
-      }
-    else if (nbytes == 0)
-      {
-        printf("adc_main: No data read, Ignoring\n");
-      }
-
-    /* Print the sample data on successful return */
-
-    else
-      {
-        int nsamples = nbytes / sizeof(struct adc_msg_s);
-        if (nsamples * sizeof(struct adc_msg_s) != nbytes)
-          {
-            printf("adc_main: read size=%ld is not a multiple of "
-                   "sample size=%d, Ignoring\n",
-                   (long)nbytes, sizeof(struct adc_msg_s));
-          }
-        else
-          {
-           for (int i = 0; i < nsamples; i++)
-            {
-              //sampled_data[tmp] = sample[i].am_data;
-              sampled_data[tmp] = sample[i].am_data;
-              tmp +=1;
-            }
-            if (tmp == 210)
-              {
-                //data->to_sent = 1;
-                area.x = 0;
-                area.y = 0;
-                area.w = 176;
-                area.h = 220;
-                draw_rect16(&my_state, &area, 5);
-                //usleep(500 * 1000);
-                for (int j = 0;j < tmp;j++)
-                  {
-                    sampled_data[j] = sampled_data[j]/(23.27);
-                    area.x = sampled_data[j];
-                    area.y = j;
-                    //printf("(%ld , %d )\n", area.x, area.y);
-                    area.w = 10;
-                    area.h = 5;
-                    draw_rect16(&my_state, &area, 2);
-                  }
-                tmp = 0;
-              }
-          }
-        } 
-  }
-  return NULL;
+  #ifdef CONFIG_FB_UPDATE
+  ret = ioctl(state->fd, FBIO_UPDATE,
+              (unsigned long)((uintptr_t)area));
+  if (ret < 0)
+    {
+      int errcode = errno;
+      fprintf(stderr, "ERROR: ioctl(FBIO_UPDATE) failed: %d\n",
+              errcode);
+    }
+  #endif
 }
 
 /****************************************************************************
@@ -272,10 +197,18 @@ void *adc_thread(void* arg)
 
 int main(int argc, FAR char *argv[])
 {
+  struct adc_msg_s sample[CONFIG_EXAMPLES_LPE_GROUPSIZE];
+  size_t readsize;
+  ssize_t nbytes;
+  int fd;
+  int errval = 0;
+  int ret;
+  int i;
+
+  UNUSED(ret);
 
   /* Check if we have initialized */
-  static struct adc_state_s g_adcstate;
-  FAR const char *fbdev = g_default_fbdev;
+
   if (!g_adcstate.initialized)
     {
       /* Initialization of the ADC hardware must be performed by
@@ -291,10 +224,22 @@ int main(int argc, FAR char *argv[])
 
   g_adcstate.count = CONFIG_EXAMPLES_LPE_NSAMPLES;
 
+  FAR const char *fbdev = g_default_fbdev;
+  struct fb_state_s state;
+  struct fb_area_s area;
+  int nsteps;
+  int xstep;
+  int ystep;
+  int width;
+  int height;
+  int color;
+  int x;
+  int y;
+
   /* Open the framebuffer driver */
 
-  my_state.fd = open(fbdev, O_RDWR);
-  if (my_state.fd < 0)
+  state.fd = open(fbdev, O_RDWR);
+  if (state.fd < 0)
     {
       int errcode = errno;
       fprintf(stderr, "ERROR: Failed to open %s: %d\n", fbdev, errcode);
@@ -303,40 +248,40 @@ int main(int argc, FAR char *argv[])
 
   /* Get the characteristics of the framebuffer */
 
-  ret = ioctl(my_state.fd, FBIOGET_VIDEOINFO,
-              (unsigned long)((uintptr_t)&my_state.vinfo));
+  ret = ioctl(state.fd, FBIOGET_VIDEOINFO,
+              (unsigned long)((uintptr_t)&state.vinfo));
   if (ret < 0)
     {
       int errcode = errno;
-      printf("ERROR: ioctl(FBIOGET_VIDEOINFO) failed: %d\n",
+      fprintf(stderr, "ERROR: ioctl(FBIOGET_VIDEOINFO) failed: %d\n",
               errcode);
-      close(my_state.fd);
+      close(state.fd);
       return EXIT_FAILURE;
     }
 
   printf("VideoInfo:\n");
-  printf("      fmt: %u\n", my_state.vinfo.fmt);
-  printf("     xres: %u\n", my_state.vinfo.xres);
-  printf("     yres: %u\n", my_state.vinfo.yres);
-  printf("  nplanes: %u\n", my_state.vinfo.nplanes);
+  printf("      fmt: %u\n", state.vinfo.fmt);
+  printf("     xres: %u\n", state.vinfo.xres);
+  printf("     yres: %u\n", state.vinfo.yres);
+  printf("  nplanes: %u\n", state.vinfo.nplanes);
 
-  ret = ioctl(my_state.fd, FBIOGET_PLANEINFO,
-              (unsigned long)((uintptr_t)&my_state.pinfo));
+  ret = ioctl(state.fd, FBIOGET_PLANEINFO,
+              (unsigned long)((uintptr_t)&state.pinfo));
   if (ret < 0)
     {
       int errcode = errno;
-      printf("ERROR: ioctl(FBIOGET_PLANEINFO) failed: %d\n",
+      fprintf(stderr, "ERROR: ioctl(FBIOGET_PLANEINFO) failed: %d\n",
               errcode);
-      close(my_state.fd);
+      close(state.fd);
       return EXIT_FAILURE;
     }
 
   printf("PlaneInfo (plane 0):\n");
-  printf("    fbmem: %p\n", my_state.pinfo.fbmem);
-  printf("    fblen: %lu\n", (unsigned long)my_state.pinfo.fblen);
-  printf("   stride: %u\n", my_state.pinfo.stride);
-  printf("  display: %u\n", my_state.pinfo.display);
-  printf("      bpp: %u\n", my_state.pinfo.bpp);
+  printf("    fbmem: %p\n", state.pinfo.fbmem);
+  printf("    fblen: %lu\n", (unsigned long)state.pinfo.fblen);
+  printf("   stride: %u\n", state.pinfo.stride);
+  printf("  display: %u\n", state.pinfo.display);
+  printf("      bpp: %u\n", state.pinfo.bpp);
 
   /* mmap() the framebuffer.
    *
@@ -347,18 +292,18 @@ int main(int argc, FAR char *argv[])
    * address mapping to make the memory accessible to the application.
    */
 
-  my_state.fbmem = mmap(NULL, my_state.pinfo.fblen, PROT_READ | PROT_WRITE,
-                     MAP_SHARED | MAP_FILE, my_state.fd, 0);
-  if (my_state.fbmem == MAP_FAILED)
+  state.fbmem = mmap(NULL, state.pinfo.fblen, PROT_READ | PROT_WRITE,
+                     MAP_SHARED | MAP_FILE, state.fd, 0);
+  if (state.fbmem == MAP_FAILED)
     {
       int errcode = errno;
       fprintf(stderr, "ERROR: ioctl(FBIOGET_PLANEINFO) failed: %d\n",
               errcode);
-      close(my_state.fd);
+      close(state.fd);
       return EXIT_FAILURE;
     }
 
-  printf("Mapped FB: %p\n", my_state.fbmem);
+  printf("Mapped FB: %p\n", state.fbmem);
 
   /* If this example is configured as an NX add-on, then limit the number of
    * samples that we collect before returning.  Otherwise, we never return
@@ -375,49 +320,129 @@ int main(int argc, FAR char *argv[])
   if (fd < 0)
     {
       printf("adc_main: open %s failed: %d\n", g_adcstate.devpath, errno);
-      int errval = 2;
+      errval = 2;
+      goto errout;
     }
 
   /* Now loop the appropriate number of times, displaying the collected
    * ADC samples.
    */
 
-  data_t shared_data;
-  shared_data.stop_flag = 0;
-  shared_data.to_sent = 0;
-  if (pthread_mutex_init(&shared_data.mtx, NULL)) {
-        fprintf(stderr, "ERROR: Could not initialize mutex.\n");
-  }
-  if (pthread_cond_init(&shared_data.output_condvar, NULL)) {
-      fprintf(stderr, "ERROR: Could not initialize condvar.\n");
-  }
+  for (; ; )
+    {
+      /* Flush any output before the loop entered or from the previous pass
+       * through the loop.
+       */
 
-  enum {
-    ADC_THREAD,
-    NUM_THREADS
-  };
-  const char* thread_names[] = {"ADC"};
-  void* (*thd_functions[])(void*) = {
-      adc_thread,
-     };
-  pthread_t threads[NUM_THREADS]; //array of threads
+      fflush(stdout);
 
-  for(int i = 0; i < NUM_THREADS; ++i)
-    { //start the threads
-      int check = pthread_create(&threads[i], NULL, thd_functions[i], &shared_data);
-      fprintf(stderr, "INFO: %s thread start: %s\r\n",
-          thread_names[i],
-          check ? "FAIL" : "ok");
-    }
-  for (int i = 0; i < NUM_THREADS; ++i)
-    { //join the threads
-      int check = pthread_join(threads[i], NULL);
-      fprintf(stderr, "INFO: %s thread joined: %s\r\n",
-          thread_names[i],
-          check ? "FAIL" : "ok");
+#ifdef CONFIG_EXAMPLES_LPE_SWTRIG
+      /* Issue the software trigger to start ADC conversion */
+
+      ret = ioctl(fd, ANIOC_TRIGGER, 0);
+      if (ret < 0)
+        {
+          int errcode = errno;
+          printf("adc_main: ANIOC_TRIGGER ioctl failed: %d\n", errcode);
+        }
+#endif
+
+      /* Read up to CONFIG_EXAMPLES_LPE_GROUPSIZE samples */
+
+      readsize = CONFIG_EXAMPLES_LPE_GROUPSIZE * sizeof(struct adc_msg_s);
+      nbytes = read(fd, sample, readsize);
+
+      /* Handle unexpected return values */
+
+      if (nbytes < 0)
+        {
+          errval = errno;
+          if (errval != EINTR)
+            {
+              printf("adc_main: read %s failed: %d\n",
+                     g_adcstate.devpath, errval);
+              errval = 3;
+              goto errout_with_dev;
+            }
+
+          printf("adc_main: Interrupted read...\n");
+        }
+      else if (nbytes == 0)
+        {
+          printf("adc_main: No data read, Ignoring\n");
+        }
+
+      /* Print the sample data on successful return */
+
+      else
+        {
+          int nsamples = nbytes / sizeof(struct adc_msg_s);
+          if (nsamples * sizeof(struct adc_msg_s) != nbytes)
+            {
+              printf("adc_main: read size=%ld is not a multiple of "
+                     "sample size=%d, Ignoring\n",
+                     (long)nbytes, sizeof(struct adc_msg_s));
+            }
+          else
+            {
+             for (i = 0; i < nsamples; i++)
+                {
+                  //printf("%d: channel: %d value: %" PRId32 "\n",
+                  //       i + 1, sample[i].am_channel, sample[i].am_data);
+                  sampled_data[tmp] = sample[i].am_data;
+                  //uint32_t sampled = sample[i].am_data;
+                  //uint32_t to_print = sampled/(18.61);
+                  //printf("%ld\n", to_print);
+                 /* area.x = to_print;
+                  area.y = tmp;
+                  area.w = 5;
+                  area.h = 5;
+                  //printf("%2d: (%3d,%3d) (%3d,%3d)\n",
+                  //       color, area.x, area.y, area.w, area.h);
+                  draw_rect16(&state, &area, 2);
+                  //usleep(500 * 1000);*/
+                  tmp +=1;
+                  
+                }
+              if (tmp == 210)
+              {
+                area.x = 0;
+                area.y = 0;
+                area.w = 176;
+                area.h = 220;
+                draw_rect16(&state, &area, 5);
+                //usleep(500 * 1000);
+                for (int j = 0;j < tmp;j++)
+                  {
+                    sampled_data[j] = sampled_data[j]/(23.27);
+                    area.x = sampled_data[j];
+                    area.y = j;
+                    //printf("(%ld , %d )\n", area.x, area.y);
+                    area.w = 10;
+                    area.h = 10;
+                    draw_rect16(&state, &area, 2);
+                  }
+                tmp = 0;
+              }
+            }
+        }
+
+      if (g_adcstate.count && --g_adcstate.count <= 0)
+        {
+          break;
+        }
     }
 
   close(fd);
   return OK;
 
+  /* Error exits */
+
+errout_with_dev:
+  close(fd);
+
+errout:
+  printf("Terminating!\n");
+  fflush(stdout);
+  return errval;
 }
