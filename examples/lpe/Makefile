@@ -35,6 +35,8 @@
 
 include $(APPDIR)/Make.defs
 
+CSRCS += KISS_FFT/kiss_fft.c
+
 # ADC example
 
 MAINSRC = lpe_main.c

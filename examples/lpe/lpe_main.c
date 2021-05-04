@@ -58,6 +58,7 @@
 #include <nuttx/video/rgbcolors.h>
 
 #include "lpe.h"
+#include "KISS_FFT/kiss_fft.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -80,12 +81,6 @@
 int tmp = 0;
 
 static const char g_default_fbdev[] = CONFIG_EXAMPLES_FB_DEFAULTFB;
-uint32_t sampled_data[230];
-static const uint16_t g_rgb16[NCOLORS] =
-{
-  RGB16_VIOLET, RGB16_BLUE, RGB16_GREEN,
-  RGB16_YELLOW, RGB16_ORANGE, RGB16_BLACK
-};
 
 struct fb_state_s
 {
@@ -144,7 +139,7 @@ static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath)
 }
 
 static void draw_rect16(FAR struct fb_state_s *state2,
-                        FAR struct fb_area_s *area, int color)
+                        FAR struct fb_area_s *area, uint32_t color)
 {
   FAR uint16_t *dest;
   FAR uint8_t *row;
@@ -155,7 +150,7 @@ static void draw_rect16(FAR struct fb_state_s *state2,
       dest = ((FAR uint16_t *)row) + area->x;
       for (int x = 0; x < area->w; x++)
         {
-          *dest++ = g_rgb16[color];
+          *dest++ = color;
         }
 
       row += state2->pinfo.stride;
@@ -178,6 +173,9 @@ void *adc_thread(void* arg)
   int errval;
   struct fb_area_s area;
   struct adc_msg_s sample[CONFIG_EXAMPLES_LPE_GROUPSIZE];
+  kiss_fft_cpx cin[210];
+  kiss_fft_cpx cout[210];
+  kiss_fft_cfg cfg = kiss_fft_alloc( 210 ,0,0,0);
   while (data->stop_flag == 0)
   {
     //fflush(stdout);
@@ -231,8 +229,8 @@ void *adc_thread(void* arg)
           {
            for (int i = 0; i < nsamples; i++)
             {
-              //sampled_data[tmp] = sample[i].am_data;
-              sampled_data[tmp] = sample[i].am_data;
+              cin[tmp].r = tmp;
+              cin[tmp].i = sample[i].am_data;
               tmp +=1;
             }
             if (tmp == 210)
@@ -242,19 +240,20 @@ void *adc_thread(void* arg)
                 area.y = 0;
                 area.w = 176;
                 area.h = 220;
-                draw_rect16(&my_state, &area, 5);
-                //usleep(500 * 1000);
+                draw_rect16(&my_state, &area, RGB16_BLACK);
+                kiss_fft(cfg,cin,cout);
                 for (int j = 0;j < tmp;j++)
                   {
-                    sampled_data[j] = sampled_data[j]/(23.27);
-                    area.x = sampled_data[j];
+                    area.x = cin[j].i/(23.27);
                     area.y = j;
-                    //printf("(%ld , %d )\n", area.x, area.y);
+                    //printf("(%d , %d )\n", area.x, area.y);
                     area.w = 10;
                     area.h = 5;
-                    draw_rect16(&my_state, &area, 2);
+                    //printf("cout r %f, cout i %f\n", cout[j].r, cout[j].i);
+                    draw_rect16(&my_state, &area, RGB16_GREEN);
                   }
                 tmp = 0;
+                //free(cfg);
               }
           }
         } 
@@ -375,7 +374,6 @@ int main(int argc, FAR char *argv[])
   if (fd < 0)
     {
       printf("adc_main: open %s failed: %d\n", g_adcstate.devpath, errno);
-      int errval = 2;
     }
 
   /* Now loop the appropriate number of times, displaying the collected

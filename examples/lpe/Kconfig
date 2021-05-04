@@ -49,4 +49,8 @@ config EXAMPLES_LPE_SWTRIG
 		issue the software trigger ioctl before attempting to read from the
 		ADC.
 
+config EXAMPLES_LPE_STACKSIZE
+	int "lpe stack size"
+	default 262144
+
 endif
