@@ -50,7 +50,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <debug.h>
-#include <pthread.h>
 
 #include <nuttx/analog/adc.h>
 #include <nuttx/analog/ioctl.h>
@@ -76,8 +75,6 @@
  * Private Data
  ****************************************************************************/
 
-#define NCOLORS 6
-
 int tmp = 0;
 
 static const char g_default_fbdev[] = CONFIG_EXAMPLES_FB_DEFAULTFB;
@@ -92,25 +89,6 @@ struct fb_state_s
 #endif
   FAR void *fbmem;
 };
-
-struct fb_state_s my_state;
-
-typedef struct data {
-    int stop_flag; //indicates if the program is running or not;
-    int to_sent; //last received letter
-    pthread_cond_t output_condvar;
-    pthread_mutex_t mtx;
-} data_t;
-
-  int nsteps;
-  int xstep;
-  int ystep;
-  int width;
-  int height;
-  size_t readsize;
-  ssize_t nbytes;
-  int fd;
-  int ret;
 
 /****************************************************************************
  * Public Data
@@ -138,13 +116,14 @@ static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath)
   adc->devpath = strdup(devpath);
 }
 
-static void draw_rect16(FAR struct fb_state_s *state2,
+static void draw_rect16(FAR struct fb_state_s *state,
                         FAR struct fb_area_s *area, uint32_t color)
 {
   FAR uint16_t *dest;
   FAR uint8_t *row;
+  int ret;
 
-  row = (FAR uint8_t *)state2->fbmem + state2->pinfo.stride * area->y;
+  row = (FAR uint8_t *)state->fbmem + state->pinfo.stride * area->y;
   for (int y = 0; y < area->h; y++)
     {
       dest = ((FAR uint16_t *)row) + area->x;
@@ -153,10 +132,10 @@ static void draw_rect16(FAR struct fb_state_s *state2,
           *dest++ = color;
         }
 
-      row += state2->pinfo.stride;
+      row += state->pinfo.stride;
     }
   #ifdef CONFIG_FB_UPDATE
-  ret = ioctl(state2->fd, FBIO_UPDATE,
+  ret = ioctl(state->fd, FBIO_UPDATE,
               (unsigned long)((uintptr_t)area));
   if (ret < 0)
     {
@@ -165,100 +144,6 @@ static void draw_rect16(FAR struct fb_state_s *state2,
               errcode);
     }
   #endif
-}
-
-void *adc_thread(void* arg)
-{
-  data_t *data = (data_t*)arg;
-  int errval;
-  struct fb_area_s area;
-  struct adc_msg_s sample[CONFIG_EXAMPLES_LPE_GROUPSIZE];
-  kiss_fft_cpx cin[210];
-  kiss_fft_cpx cout[210];
-  kiss_fft_cfg cfg = kiss_fft_alloc( 210 ,0,0,0);
-  while (data->stop_flag == 0)
-  {
-    //fflush(stdout);
-
-#ifdef CONFIG_EXAMPLES_LPE_SWTRIG
-    /* Issue the software trigger to start ADC conversion */
-
-    ret = ioctl(fd, ANIOC_TRIGGER, 0);
-    if (ret < 0)
-      {
-        int errcode = errno;
-        printf("adc_main: ANIOC_TRIGGER ioctl failed: %d\n", errcode);
-      }
-#endif
-
-    /* Read up to CONFIG_EXAMPLES_LPE_GROUPSIZE samples */
-
-    readsize = CONFIG_EXAMPLES_LPE_GROUPSIZE * sizeof(struct adc_msg_s);
-    nbytes = read(fd, sample, readsize);
-
-    /* Handle unexpected return values */
-    
-    if (nbytes < 0)
-      {
-        errval = errno;
-        if (errval != EINTR)
-          {
-            printf("adc_main: read failed: %d\n", errval);
-            errval = 3;
-          }
-
-        printf("adc_main: Interrupted read...\n");
-      }
-    else if (nbytes == 0)
-      {
-        printf("adc_main: No data read, Ignoring\n");
-      }
-
-    /* Print the sample data on successful return */
-
-    else
-      {
-        int nsamples = nbytes / sizeof(struct adc_msg_s);
-        if (nsamples * sizeof(struct adc_msg_s) != nbytes)
-          {
-            printf("adc_main: read size=%ld is not a multiple of "
-                   "sample size=%d, Ignoring\n",
-                   (long)nbytes, sizeof(struct adc_msg_s));
-          }
-        else
-          {
-           for (int i = 0; i < nsamples; i++)
-            {
-              cin[tmp].r = tmp;
-              cin[tmp].i = sample[i].am_data;
-              tmp +=1;
-            }
-            if (tmp == 210)
-              {
-                //data->to_sent = 1;
-                area.x = 0;
-                area.y = 0;
-                area.w = 176;
-                area.h = 220;
-                draw_rect16(&my_state, &area, RGB16_BLACK);
-                kiss_fft(cfg,cin,cout);
-                for (int j = 0;j < tmp;j++)
-                  {
-                    area.x = cin[j].i/(23.27);
-                    area.y = j;
-                    //printf("(%d , %d )\n", area.x, area.y);
-                    area.w = 10;
-                    area.h = 5;
-                    //printf("cout r %f, cout i %f\n", cout[j].r, cout[j].i);
-                    draw_rect16(&my_state, &area, RGB16_GREEN);
-                  }
-                tmp = 0;
-                //free(cfg);
-              }
-          }
-        } 
-  }
-  return NULL;
 }
 
 /****************************************************************************
@@ -275,6 +160,18 @@ int main(int argc, FAR char *argv[])
   /* Check if we have initialized */
   static struct adc_state_s g_adcstate;
   FAR const char *fbdev = g_default_fbdev;
+  struct fb_state_s my_state;
+
+  int nsteps;
+  int xstep;
+  int ystep;
+  int width;
+  int height;
+  size_t readsize;
+  ssize_t nbytes;
+  int fd;
+  int ret;
+  int stop = 0;
   if (!g_adcstate.initialized)
     {
       /* Initialization of the ADC hardware must be performed by
@@ -380,40 +277,100 @@ int main(int argc, FAR char *argv[])
    * ADC samples.
    */
 
-  data_t shared_data;
-  shared_data.stop_flag = 0;
-  shared_data.to_sent = 0;
-  if (pthread_mutex_init(&shared_data.mtx, NULL)) {
-        fprintf(stderr, "ERROR: Could not initialize mutex.\n");
-  }
-  if (pthread_cond_init(&shared_data.output_condvar, NULL)) {
-      fprintf(stderr, "ERROR: Could not initialize condvar.\n");
-  }
+  int errval;
+  struct fb_area_s area;
+  struct adc_msg_s sample[CONFIG_EXAMPLES_LPE_GROUPSIZE];
+  kiss_fft_cpx cin[210];
+  kiss_fft_cpx cout[210];
+  kiss_fft_cfg cfg = kiss_fft_alloc( 210 ,0,0,0);
+  while (1)
+  {
 
-  enum {
-    ADC_THREAD,
-    NUM_THREADS
-  };
-  const char* thread_names[] = {"ADC"};
-  void* (*thd_functions[])(void*) = {
-      adc_thread,
-     };
-  pthread_t threads[NUM_THREADS]; //array of threads
+#ifdef CONFIG_EXAMPLES_LPE_SWTRIG
+    /* Issue the software trigger to start ADC conversion */
 
-  for(int i = 0; i < NUM_THREADS; ++i)
-    { //start the threads
-      int check = pthread_create(&threads[i], NULL, thd_functions[i], &shared_data);
-      fprintf(stderr, "INFO: %s thread start: %s\r\n",
-          thread_names[i],
-          check ? "FAIL" : "ok");
-    }
-  for (int i = 0; i < NUM_THREADS; ++i)
-    { //join the threads
-      int check = pthread_join(threads[i], NULL);
-      fprintf(stderr, "INFO: %s thread joined: %s\r\n",
-          thread_names[i],
-          check ? "FAIL" : "ok");
-    }
+    ret = ioctl(fd, ANIOC_TRIGGER, 0);
+    if (ret < 0)
+      {
+        int errcode = errno;
+        printf("adc_main: ANIOC_TRIGGER ioctl failed: %d\n", errcode);
+      }
+#endif
+
+    /* Read up to CONFIG_EXAMPLES_LPE_GROUPSIZE samples */
+
+    readsize = CONFIG_EXAMPLES_LPE_GROUPSIZE * sizeof(struct adc_msg_s);
+    nbytes = read(fd, sample, readsize);
+
+    /* Handle unexpected return values */
+    
+    if (nbytes < 0)
+      {
+        errval = errno;
+        if (errval != EINTR)
+          {
+            printf("adc_main: read failed: %d\n", errval);
+            errval = 3;
+          }
+
+        printf("adc_main: Interrupted read...\n");
+      }
+    else if (nbytes == 0)
+      {
+        printf("adc_main: No data read, Ignoring\n");
+      }
+
+    /* Print the sample data on successful return */
+
+    else
+      {
+        int nsamples = nbytes / sizeof(struct adc_msg_s);
+        if (nsamples * sizeof(struct adc_msg_s) != nbytes)
+          {
+            printf("adc_main: read size=%ld is not a multiple of "
+                   "sample size=%d, Ignoring\n",
+                   (long)nbytes, sizeof(struct adc_msg_s));
+          }
+        else
+          {
+           for (int i = 0; i < nsamples; i++)
+            {
+              cin[tmp].r = sample[i].am_data;
+              cin[tmp].i = 0;
+              tmp +=1;
+            }
+            if (tmp == 210)
+              {
+                //data->to_sent = 1;
+                area.x = 0;
+                area.y = 0;
+                area.w = 176;
+                area.h = 220;
+                draw_rect16(&my_state, &area, RGB16_BLACK);
+                kiss_fft(cfg,cin,cout);
+                for (int j = 0;j < tmp;j++)
+                  {
+                    area.x = cin[j].r/(23.27);
+                    area.y = j;
+                    //printf("(%d , %d )\n", area.x, area.y);
+                    area.w = 10;
+                    area.h = 5;
+                    draw_rect16(&my_state, &area, RGB16_GREEN);
+                  }
+                if (stop == 0){
+                for (int j = 0;j<tmp/2;j++)
+                {
+                  printf("cout r %d, cout i %d mag %d\n", (int)cout[j].r, (int)cout[j].i, sqrt((int)cout[j].r*(int)cout[j].r +(int)cout[j].i*
+                                                            (int)cout[j].i));
+                }
+                stop = 1;
+                }
+                tmp = 0;
+                //free(cfg);
+              }
+          }
+        } 
+  }
 
   close(fd);
   return OK;
