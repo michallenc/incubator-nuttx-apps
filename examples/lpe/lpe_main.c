@@ -280,9 +280,10 @@ int main(int argc, FAR char *argv[])
   int errval;
   struct fb_area_s area;
   struct adc_msg_s sample[CONFIG_EXAMPLES_LPE_GROUPSIZE];
-  kiss_fft_cpx cin[210];
-  kiss_fft_cpx cout[210];
-  kiss_fft_cfg cfg = kiss_fft_alloc( 210 ,0,0,0);
+  int nfft = 1024;
+  kiss_fft_cpx cin[nfft];
+  kiss_fft_cpx cout[nfft];
+  kiss_fft_cfg cfg = kiss_fft_alloc( nfft ,0,0,0);
   while (1)
   {
 
@@ -339,7 +340,7 @@ int main(int argc, FAR char *argv[])
               cin[tmp].i = 0;
               tmp +=1;
             }
-            if (tmp == 210)
+            if (tmp == nfft)
               {
                 //data->to_sent = 1;
                 area.x = 0;
@@ -348,23 +349,27 @@ int main(int argc, FAR char *argv[])
                 area.h = 220;
                 draw_rect16(&my_state, &area, RGB16_BLACK);
                 kiss_fft(cfg,cin,cout);
-                for (int j = 0;j < tmp;j++)
+                for (int j = 0;j < 220;j = j+1)
                   {
-                    area.x = cin[j].r/(23.27);
+                    int mag = (int)sqrt((int)cout[j].r*(int)cout[j].r+(int)cout[j].i*(int)cout[j].i)/200;
+                    area.x = 1;
                     area.y = j;
                     //printf("(%d , %d )\n", area.x, area.y);
-                    area.w = 10;
-                    area.h = 5;
+                    area.w = mag;
+                    area.h = 1;
+                    if (area.w > 175)
+                    {
+                      area.w = 175;
+                    }
                     draw_rect16(&my_state, &area, RGB16_GREEN);
                   }
-                if (stop == 0){
+                if (stop == 5){
                 for (int j = 0;j<tmp/2;j++)
                 {
-                  printf("cout r %d, cout i %d mag %d\n", (int)cout[j].r, (int)cout[j].i, sqrt((int)cout[j].r*(int)cout[j].r +(int)cout[j].i*
-                                                            (int)cout[j].i));
+                  //printf("bin %d mag %d\n", j, (int)sqrt((int)cout[j].r*(int)cout[j].r+(int)cout[j].i*(int)cout[j].i));
                 }
-                stop = 1;
                 }
+                stop = stop + 1;
                 tmp = 0;
                 //free(cfg);
               }
