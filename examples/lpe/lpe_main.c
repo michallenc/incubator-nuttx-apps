@@ -116,6 +116,10 @@ static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath)
   adc->devpath = strdup(devpath);
 }
 
+/****************************************************************************
+ * Name: draw_rect16
+ ****************************************************************************/
+
 static void draw_rect16(FAR struct fb_state_s *state,
                         FAR struct fb_area_s *area, uint32_t color)
 {
@@ -151,41 +155,20 @@ static void draw_rect16(FAR struct fb_state_s *state,
  ****************************************************************************/
 
 /****************************************************************************
- * Name: adc_main
+ * Name: lpe_main
  ****************************************************************************/
 
 int main(int argc, FAR char *argv[])
 {
 
-  /* Check if we have initialized */
   static struct adc_state_s g_adcstate;
   FAR const char *fbdev = g_default_fbdev;
   struct fb_state_s my_state;
 
-  int nsteps;
-  int xstep;
-  int ystep;
-  int width;
-  int height;
   size_t readsize;
   ssize_t nbytes;
   int fd;
   int ret;
-  int stop = 0;
-  if (!g_adcstate.initialized)
-    {
-      /* Initialization of the ADC hardware must be performed by
-       * board-specific logic prior to running this test.
-       */
-
-      /* Set the default values */
-
-      adc_devpath(&g_adcstate, CONFIG_EXAMPLES_ADC_DEVPATH);
-
-      g_adcstate.initialized = true;
-    }
-
-  g_adcstate.count = CONFIG_EXAMPLES_LPE_NSAMPLES;
 
   /* Open the framebuffer driver */
 
@@ -260,6 +243,23 @@ int main(int argc, FAR char *argv[])
    * samples that we collect before returning.  Otherwise, we never return
    */
 
+  /* Check if we have initialized ADC */
+
+  if (!g_adcstate.initialized)
+    {
+      /* Initialization of the ADC hardware must be performed by
+       * board-specific logic prior to running this test.
+       */
+
+      /* Set the default values */
+
+      adc_devpath(&g_adcstate, CONFIG_EXAMPLES_ADC_DEVPATH);
+
+      g_adcstate.initialized = true;
+    }
+
+  g_adcstate.count = CONFIG_EXAMPLES_LPE_NSAMPLES;
+
   printf("adc_main: g_adcstate.count: %d\n", g_adcstate.count);
 
   /* Open the ADC device for reading */
@@ -281,9 +281,14 @@ int main(int argc, FAR char *argv[])
   struct fb_area_s area;
   struct adc_msg_s sample[CONFIG_EXAMPLES_LPE_GROUPSIZE];
   int nfft = 1024;
+
   kiss_fft_cpx cin[nfft];
   kiss_fft_cpx cout[nfft];
+
+  /* Initialize FFT */
+
   kiss_fft_cfg cfg = kiss_fft_alloc( nfft ,0,0,0);
+
   while (1)
   {
 
@@ -336,25 +341,42 @@ int main(int argc, FAR char *argv[])
           {
            for (int i = 0; i < nsamples; i++)
             {
+              /* Save readed data to array for furhter FFT computation */
               cin[tmp].r = sample[i].am_data;
               cin[tmp].i = 0;
+
               tmp +=1;
             }
             if (tmp == nfft)
               {
-                //data->to_sent = 1;
+                /* Clear display
                 area.x = 0;
                 area.y = 0;
                 area.w = 176;
                 area.h = 220;
-                draw_rect16(&my_state, &area, RGB16_BLACK);
+                draw_rect16(&my_state, &area, RGB16_BLACK);*/
+
+                /* Do FFT */
+
                 kiss_fft(cfg,cin,cout);
+
+                /* Print the result of FFT to disply */
+
                 for (int j = 0;j < 220;j = j+1)
                   {
+                    /* Clear display */
+
+                    area.x = 1;
+                    area.y = j;
+                    area.w = 176;
+                    area.h = 1;
+                    draw_rect16(&my_state, &area, RGB16_BLACK);
+
+                    /* Compute magnitude and print it do display */
+
                     int mag = (int)sqrt((int)cout[j].r*(int)cout[j].r+(int)cout[j].i*(int)cout[j].i)/200;
                     area.x = 1;
                     area.y = j;
-                    //printf("(%d , %d )\n", area.x, area.y);
                     area.w = mag;
                     area.h = 1;
                     if (area.w > 175)
@@ -363,20 +385,12 @@ int main(int argc, FAR char *argv[])
                     }
                     draw_rect16(&my_state, &area, RGB16_GREEN);
                   }
-                if (stop == 5){
-                for (int j = 0;j<tmp/2;j++)
-                {
-                  //printf("bin %d mag %d\n", j, (int)sqrt((int)cout[j].r*(int)cout[j].r+(int)cout[j].i*(int)cout[j].i));
-                }
-                }
-                stop = stop + 1;
                 tmp = 0;
-                //free(cfg);
               }
           }
         } 
   }
-
+  free(cfg);
   close(fd);
   return OK;
 
