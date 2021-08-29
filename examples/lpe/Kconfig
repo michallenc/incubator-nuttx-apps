@@ -6,7 +6,7 @@
 config EXAMPLES_LPE
 	tristate "LPE example"
 	default n
-	depends on ADC && LIB_BOARDCTL
+	depends on ADC
 	---help---
 		Enable the LPE example
 
