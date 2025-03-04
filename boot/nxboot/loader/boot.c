@@ -722,7 +722,9 @@ confirm_done:
 int nxboot_perform_update(bool check_only)
 {
   int ret;
+  int primary;
   struct nxboot_state state;
+  struct nxboot_img_header header;
 
   ret = nxboot_get_state(&state);
   if (ret < 0)
@@ -739,8 +741,28 @@ int nxboot_perform_update(bool check_only)
         {
           syslog(LOG_ERR, "Update process failed. %s\n",
              strerror(errno));
+          return ERROR;
         }
     }
+
+  /* Check whether there is a valid image in the primary slot. This just
+   * checks whether the header is valid, but does not calculate the CRC
+   * of the image as this would prolong the boot process.
+   */
+
+  primary = flash_partition_open(CONFIG_NXBOOT_PRIMARY_SLOT_PATH);
+  if (primary < 0)
+    {
+      return ERROR;
+    }
+
+  get_image_header(primary, &header);
+  if (!validate_image_header(&header))
+    {
+      ret = ERROR;
+    }
+
+  flash_partition_close(primary);
 
   return ret;
 }
