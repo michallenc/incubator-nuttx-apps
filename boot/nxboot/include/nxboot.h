@@ -129,6 +129,22 @@ struct nxboot_state
 int nxboot_get_state(struct nxboot_state *state);
 
 /****************************************************************************
+ * Name: nxboot_open_update_partition
+ *
+ * Description:
+ *   Gets the current bootloader state and opens the partition to which an
+ *   update image should be stored. It returns the valid file descriptor to
+ *   this partition, the user is responsible for writing to it and closing
+ *   if afterwards.
+ *
+ * Returned Value:
+ *   Valid file descriptor on success, -1 and sets errno on failure.
+ *
+ ****************************************************************************/
+
+int nxboot_open_update_partition(void);
+
+/****************************************************************************
  * Name: nxboot_get_confirm
  *
  * Description:
