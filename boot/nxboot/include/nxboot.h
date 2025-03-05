@@ -58,7 +58,7 @@
                                             * are considered to be valid.
                                             */
 
-#define NXBOOT_HEADER_PRERELEASE_MAXLEN 110
+#define NXBOOT_HEADER_PRERELEASE_MAXLEN 94
 
 /****************************************************************************
  * Public Types
@@ -84,11 +84,28 @@ struct nxboot_img_version
   char pre_release[NXBOOT_HEADER_PRERELEASE_MAXLEN];  /* Additional pre-release version */
 };
 
+struct nxboot_img_header_version
+{
+  uint8_t major;
+  uint8_t minor;
+};
+
 struct nxboot_img_header
 {
-  uint32_t magic;  /* Header magic */
-  uint32_t size;   /* Image size (excluding the header) */
-  uint32_t crc;    /* CRC32 of image (excluding the header). */
+  uint32_t magic;                                /* Header magic */
+  struct nxboot_img_header_version hdr_version;  /* Version of the header */
+
+  uint16_t header_size;     /* Length of the header in bytes */
+  uint32_t crc;             /* CRC32 of image (excluding the previous
+                             * fields in header, but including the following
+                             * ones).
+                             */
+  uint32_t size;            /* Image size (excluding the header) */
+  uint64_t identifier;      /* Platform identifier. An image is rejected
+                             * if it does not match the one set for
+                             * the bootloader in NXBOOT_PLATFORM_IDENTIFIER.
+                             */
+  uint32_t extd_hdr_ptr;    /* Address of the next extender header */
 
   struct nxboot_img_version img_version; /* Image version */
 };

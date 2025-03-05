@@ -122,8 +122,8 @@ static uint32_t calculate_crc(int fd, struct nxboot_img_header *header)
     }
 
   crc = 0xffffffff;
-  remain = header->size;
-  off = CONFIG_NXBOOT_HEADER_SIZE;
+  off = offsetof(struct nxboot_img_header, crc) + sizeof crc;
+  remain = header->size + header->header_size - off;
   while (remain > 0)
     {
       readsiz = remain > info.blocksize ? info.blocksize : remain;
