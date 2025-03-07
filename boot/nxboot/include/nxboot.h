@@ -44,6 +44,9 @@
  * end.
  */
 
+#define NXBOOT_CONFIRMED_PAGE_INDEX (0)
+#define NXBOOT_COUNTER_PAGE_INDEX   (1)
+
 #define NXBOOT_HEADER_MAGIC     0x534f584e /* NXOS. The NX images, both
                                             * uploaded directly to primary
                                             * partition via debugger and to
@@ -53,7 +56,7 @@
                                             * primary flash, it is considered
                                             * valid.
                                             */
-#define NXBOOT_HEADER_MAGIC_INV 0xaca0abb1 /* NXOS inverted. This is used
+#define NXBOOT_HEADER_MAGIC_INT 0xaca0abb0 /* NXOS internal. This is used
                                             * for internal bootloader
                                             * handling and operations. It is
                                             * switch internally to distinguish
@@ -62,6 +65,8 @@
                                             * after the bootloader performed
                                             * its operation.
                                             */
+
+#define NXBOOT_HEADER_MAGIC_INT_MASK 0xfffffff0
 
 #define NXBOOT_HEADER_PRERELEASE_MAXLEN 94
 
@@ -123,6 +128,7 @@ struct nxboot_state
   int update;                         /* Number of update slot */
   int recovery;                       /* Number of recovery slot */
   bool recovery_valid;                /* True if recovery image contains valid recovery */
+  bool recovery_present;              /* True if the iomage in primary has a recovery */
   bool primary_confirmed;             /* True if primary slot is confirmed */
   enum nxboot_update_type next_boot;  /* True if update slot has a valid image */
 };
