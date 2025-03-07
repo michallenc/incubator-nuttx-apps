@@ -89,7 +89,7 @@ config NXBOOT_PREVENT_DOWNGRADE
 		performed only for newer versions  (according to Semantic Version
 		preference rules).
 
-		WARNING: NXboot currently implementes preferences only for
+		WARNING: NXboot currently implements preferences only for
 		MAJOR.MINOR.PATCH and ignores prerelease.
 
 endif # NXBOOT_BOOTLOADER

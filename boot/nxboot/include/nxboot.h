@@ -39,23 +39,28 @@
 #define NXBOOT_SECONDARY_SLOT_NUM (1)
 #define NXBOOT_TERTIARY_SLOT_NUM  (2)
 
-/* Offsets to write pages containing confirmed and updated flags. These
- * pages are located at the end of the partition, therefore index 0 means
- * the first page from the end.
+/* Offsets to write pages containing confirmed flag. This page is located at
+ * the end of the partition, therefore index 0 means the first page from the
+ * end.
  */
 
-#define NXBOOT_CONFIRMED_PAGE_INDEX (0)
-#define NXBOOT_UPDATED_PAGE_INDEX   (1)
-
-#define NXBOOT_HEADER_MAGIC     0x534f584e /* NXOS. */
+#define NXBOOT_HEADER_MAGIC     0x534f584e /* NXOS. The NX images, both
+                                            * uploaded directly to primary
+                                            * partition via debugger and to
+                                            * update via some application
+                                            * are used with this magic. If
+                                            * this image is uploaded to
+                                            * primary flash, it is considered
+                                            * valid.
+                                            */
 #define NXBOOT_HEADER_MAGIC_INV 0xaca0abb1 /* NXOS inverted. This is used
-                                            * for images uploaded directly
-                                            * to the primary flash with
-                                            * the debugger. These images
-                                            * does not have precalculated
-                                            * CRC and flags at the
-                                            * end of the partition, but
-                                            * are considered to be valid.
+                                            * for internal bootloader
+                                            * handling and operations. It is
+                                            * switch internally to distinguish
+                                            * between images uploaded via
+                                            * debugger or the ones updated
+                                            * after the bootloader performed
+                                            * its operation.
                                             */
 
 #define NXBOOT_HEADER_PRERELEASE_MAXLEN 94

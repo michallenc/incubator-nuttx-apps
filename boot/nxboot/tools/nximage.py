@@ -39,7 +39,6 @@ class NxImage:
         version: str,
         header_size: int,
         identifier: int,
-        primary: bool,
     ) -> None:
         self.path = path
         self.result = result
@@ -47,7 +46,6 @@ class NxImage:
         self.version = semantic_version.Version(version)
         self.header_size = header_size
         self.identifier = identifier
-        self.primary = primary
         self.crc = 0
         self.extd_hdr_ptr = 0
 
@@ -60,7 +58,6 @@ class NxImage:
             f"  version:     {self.version}\n"
             f"  header_size: {self.header_size:x}\n"
             f"  identifier:  {self.identifier:x}\n"
-            f"  primary:     {self.primary}\n"
             f"  crc:         {self.crc:x}\n"
             f">"
         )
@@ -68,10 +65,7 @@ class NxImage:
 
     def add_header(self) -> None:
         with open(self.path, "r+b") as src, open(self.result, "w+b") as dest:
-            if self.primary:
-                dest.write(b"\xb1\xab\xa0\xac")
-            else:
-                dest.write(b"\x4e\x58\x4f\x53")
+            dest.write(b"\x4e\x58\x4f\x53")
             dest.write(struct.pack("<H", 0))
             dest.write(struct.pack("<H", self.header_size))
             dest.write(struct.pack("<I", 0xFFFFFFFF))
@@ -91,13 +85,12 @@ class NxImage:
             while data := src.read(io.DEFAULT_BUFFER_SIZE):
                 dest.write(data)
 
-        if not self.primary:
-            with open(self.result, "r+b") as f:
-                f.seek(12)
-                while data := f.read(io.DEFAULT_BUFFER_SIZE):
-                    self.crc = zlib.crc32(data, self.crc)
-                f.seek(8)
-                f.write(struct.pack("<I", self.crc))
+        with open(self.result, "r+b") as f:
+            f.seek(12)
+            while data := f.read(io.DEFAULT_BUFFER_SIZE):
+                self.crc = zlib.crc32(data, self.crc)
+            f.seek(8)
+            f.write(struct.pack("<I", self.crc))
 
 
 def parse_args() -> argparse.Namespace:
@@ -119,11 +112,6 @@ def parse_args() -> argparse.Namespace:
         type=lambda x: int(x, 0),
         default=0x0,
         help="Platform identifier. An image is rejected if its identifier doesn't match the one set in bootloader.",
-    )
-    parser.add_argument(
-        "--primary",
-        action="store_true",
-        help="Primary image intended to be uploaded directly to primary memory.",
     )
     parser.add_argument(
         "-v",
@@ -151,10 +139,8 @@ def main() -> None:
         args.version,
         args.header_size,
         args.identifier,
-        args.primary,
     )
     image.add_header()
-    print(image)
     if args.v:
         print(image)
 

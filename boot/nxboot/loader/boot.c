@@ -46,31 +46,23 @@
 #endif
 
 /****************************************************************************
+ * Private Types
+ ****************************************************************************/
+
+enum nxboot_operation
+{
+  CREATE_RECOVERY = 0,
+  DO_UPDATE,
+  DO_REVERT,
+};
+
+/****************************************************************************
  * Private Functions
  ****************************************************************************/
 
-static inline bool get_image_flag(int fd, int index)
+static inline int get_image_last_wp(int fd)
 {
-  uint8_t flag;
-  struct flash_partition_info info;
-
-  if (flash_partition_info(fd, &info) < 0)
-    {
-      return false;
-    }
-
-  if (flash_partition_read(fd, &flag, 1,
-                           info.size - info.blocksize * (index + 1)) < 0)
-    {
-      return false;
-    }
-
-  return flag == 0xfe;
-}
-
-static inline int set_image_flag(int fd, int index)
-{
-  uint8_t flag;
+  uint8_t val;
   struct flash_partition_info info;
 
   if (flash_partition_info(fd, &info) < 0)
@@ -78,9 +70,25 @@ static inline int set_image_flag(int fd, int index)
       return ERROR;
     }
 
-  flag = 0xfe;
-  return flash_partition_write(fd, &flag, 1,
-                               info.size - (info.blocksize * (index + 1)));
+  if (flash_partition_read(fd, &val, 1, info.size - info.blocksize) < 0)
+    {
+      return ERROR;
+    }
+
+  return val;
+}
+
+static inline int set_image_last_wp(int fd, uint8_t value)
+{
+  uint8_t val;
+  struct flash_partition_info info;
+
+  if (flash_partition_info(fd, &info) < 0)
+    {
+      return ERROR;
+    }
+
+  return flash_partition_write(fd, &val, 1, info.size - info.blocksize);
 }
 
 static inline void get_image_header(int fd, struct nxboot_img_header *header)
@@ -142,12 +150,12 @@ static uint32_t calculate_crc(int fd, struct nxboot_img_header *header)
   return ~crc;
 }
 
-static int copy_partition(int from, int where)
+static int copy_partition(int from, int where,
+                          enum nxboot_operation operation)
 {
   struct nxboot_img_header header;
   struct flash_partition_info info_from;
   struct flash_partition_info info_where;
-  uint32_t crc;
   uint32_t magic;
   int readsiz;
   int remain;
@@ -187,26 +195,20 @@ static int copy_partition(int from, int where)
 
   remain = header.size + CONFIG_NXBOOT_HEADER_SIZE;
   off = 0;
-  if (header.magic == NXBOOT_HEADER_MAGIC_INV)
+  if (operation != DO_REVERT)
     {
-      /* This means we are doing a recovery of a primary image
-       * without the precalculated CRC. Calculate CRC and insert it
-       * into the recovery image header. Also flip header's magic to
-       * indicate this is an image with valid CRC.
-       */
+      magic = header.magic == NXBOOT_HEADER_MAGIC_INV ?
+        NXBOOT_HEADER_MAGIC : NXBOOT_HEADER_MAGIC_INV;
 
-      magic = NXBOOT_HEADER_MAGIC;
-      crc = calculate_crc(from, &header);
       if (flash_partition_read(from, buf, blocksize, 0) < 0)
         {
           free(buf);
           return ERROR;
         }
-
+        
+      syslog(LOG_INFO, "Old magic %lx, new %lx\n", header.magic, magic);
       memcpy(buf + offsetof(struct nxboot_img_header, magic), &magic,
              sizeof magic);
-      memcpy(buf + offsetof(struct nxboot_img_header, crc), &crc,
-             sizeof crc);
       if (flash_partition_write(where, buf, blocksize, 0) < 0)
         {
           free(buf);
@@ -236,27 +238,6 @@ static int copy_partition(int from, int where)
       remain -= readsiz;
     }
 
-  if (header.magic != NXBOOT_HEADER_MAGIC_INV)
-    {
-      /* Copy currently set flags but only if the image has
-       * precalculated CRC.
-       */
-
-      if (get_image_flag(from, NXBOOT_UPDATED_PAGE_INDEX))
-        {
-          set_image_flag(where, NXBOOT_UPDATED_PAGE_INDEX);
-        }
-
-      if (get_image_flag(from, NXBOOT_CONFIRMED_PAGE_INDEX))
-        {
-          set_image_flag(where, NXBOOT_CONFIRMED_PAGE_INDEX);
-        }
-    }
-  else
-    {
-      set_image_flag(where, NXBOOT_CONFIRMED_PAGE_INDEX);
-    }
-
   free(buf);
   return OK;
 }
@@ -271,21 +252,7 @@ static bool validate_image(int fd)
       return false;
     }
 
-  if (header.magic == NXBOOT_HEADER_MAGIC_INV)
-    {
-      /* Images with no precalculated CRC are considered valid. These
-       * should be the images that are uploaded directly to the primary
-       * paritition with debugger/flasher and are not uploaded by the
-       * bootloader. These images also don't have confirmed flags,
-       * altough they are considered stable.
-       */
-
-      return true;
-    }
-  else
-    {
-      return calculate_crc(fd, &header) == header.crc;
-    }
+  return calculate_crc(fd, &header) == header.crc;
 }
 
 static bool compare_versions(struct nxboot_img_version *v1,
@@ -329,25 +296,36 @@ static bool compare_versions(struct nxboot_img_version *v1,
 }
 
 static enum nxboot_update_type
-  get_update_type(int primary, int update, int recovery,
+  get_update_type(struct nxboot_state *state,
+                  int primary, int update, int recovery,
                   struct nxboot_img_header *primary_header,
-                  struct nxboot_img_header *update_header)
+                  struct nxboot_img_header *update_header,
+                  struct nxboot_img_header *recovery_header)
 {
-  if (get_image_flag(recovery, NXBOOT_CONFIRMED_PAGE_INDEX) &&
-      get_image_flag(update, NXBOOT_UPDATED_PAGE_INDEX) &&
-      ((!get_image_flag(primary, NXBOOT_CONFIRMED_PAGE_INDEX) &&
-      primary_header->magic != NXBOOT_HEADER_MAGIC_INV) ||
-      !validate_image(primary)) && validate_image(recovery))
+  bool ready_to_upd;
+  
+  ready_to_upd = false;
+  if (update_header->magic == NXBOOT_HEADER_MAGIC && validate_image(update))
+    {
+      ready_to_upd = true;
+    }
+
+  syslog(LOG_INFO, "recovery magic %lx, primary magic %lx, primary confirmed %d, recovery valid %d\n",
+    recovery_header->magic, primary_header->magic, state->primary_confirmed, state->recovery_valid);
+
+  if ((recovery_header->magic == NXBOOT_HEADER_MAGIC_INV) &&
+       !ready_to_upd &&
+      ((primary_header->magic == NXBOOT_HEADER_MAGIC_INV &&
+      !state->primary_confirmed) || !validate_image(primary))
+      && validate_image(recovery))
     {
       return NXBOOT_UPDATE_TYPE_REVERT;
     }
 
-  if (!get_image_flag(update, NXBOOT_CONFIRMED_PAGE_INDEX) &&
-      !get_image_flag(update, NXBOOT_UPDATED_PAGE_INDEX) &&
-      validate_image(update))
+  if (ready_to_upd)
     {
       if (compare_versions(&primary_header->img_version,
-                           &update_header->img_version) &&
+          &update_header->img_version) &&
           validate_image(primary))
         {
           return NXBOOT_UPDATE_TYPE_NONE;
@@ -394,7 +372,7 @@ static int perform_update(struct nxboot_state *state, bool check_only)
       if (validate_image(recovery))
         {
           syslog(LOG_INFO, "Reverting image to recovery.\n");
-          copy_partition(recovery, primary);
+          copy_partition(recovery, primary, DO_REVERT);
         }
     }
   else
@@ -425,7 +403,7 @@ static int perform_update(struct nxboot_state *state, bool check_only)
            */
 
           syslog(LOG_INFO, "Creating recovery image.\n");
-          copy_partition(primary, recovery);
+          copy_partition(primary, recovery, CREATE_RECOVERY);
           if (!validate_image(recovery))
             {
               syslog(LOG_INFO, "New recovery is not valid, stop update\n");
@@ -440,13 +418,17 @@ static int perform_update(struct nxboot_state *state, bool check_only)
           /* Perform update only if update slot contains valid image. */
 
           syslog(LOG_INFO, "Updating from update image.\n");
-          copy_partition(update, primary);
+          if (copy_partition(update, primary, DO_UPDATE) >= 0)
+            {
+              syslog(LOG_INFO, "Update done, set flag and erase header\n");
+              set_image_last_wp(primary, state->recovery);
 
-          /* Mark update slot as updated. This is to prevent repeated
-           * updates.
-           */
-
-          set_image_flag(update, NXBOOT_UPDATED_PAGE_INDEX);
+              /* Mark update slot as updated. This is to prevent repeated
+               * updates.
+               */
+        
+              flash_partition_erase_first_sector(update);
+            }
         }
     }
 
@@ -485,10 +467,12 @@ int nxboot_get_state(struct nxboot_state *state)
   int tertiary;
   int update;
   int recovery;
+  int recovery_pointer;
   struct nxboot_img_header primary_header;
   struct nxboot_img_header secondary_header;
   struct nxboot_img_header tertiary_header;
   struct nxboot_img_header *update_header;
+  struct nxboot_img_header *recovery_header;
 
   memset(state, 0, sizeof *state);
 
@@ -520,42 +504,76 @@ int nxboot_get_state(struct nxboot_state *state)
   update = secondary;
   recovery = tertiary;
   update_header = &secondary_header;
+  recovery_header = &tertiary_header;
   state->update = NXBOOT_SECONDARY_SLOT_NUM;
   state->recovery = NXBOOT_TERTIARY_SLOT_NUM;
-  if (get_image_flag(secondary, NXBOOT_CONFIRMED_PAGE_INDEX) &&
-      validate_image(secondary))
-    {
-      /* Secondary image is confirmed and valid, use this as
-       * a potential recovery.
-       */
 
+  if (tertiary_header.magic == NXBOOT_HEADER_MAGIC)
+    {
       update = tertiary;
       recovery = secondary;
-      state->recovery = NXBOOT_SECONDARY_SLOT_NUM;
-      state->update = NXBOOT_TERTIARY_SLOT_NUM;
       update_header = &tertiary_header;
-
-      if (secondary_header.crc == primary_header.crc)
+      recovery_header = &secondary_header;
+      state->recovery = NXBOOT_SECONDARY_SLOT_NUM;
+      state->update = NXBOOT_TERTIARY_SLOT_NUM;      
+    }
+  else if (secondary_header.magic == NXBOOT_HEADER_MAGIC_INV &&
+           tertiary_header.magic == NXBOOT_HEADER_MAGIC_INV)
+    {
+      recovery_pointer = get_image_last_wp(primary);
+      if (recovery_pointer != 0xff)
         {
-          state->recovery_valid = true;
+          recovery_pointer &= 0x3;
+          if (recovery_pointer == NXBOOT_SECONDARY_SLOT_NUM)
+            {
+              update = tertiary;
+              recovery = secondary;
+              update_header = &tertiary_header;
+              recovery_header = &secondary_header;
+              state->recovery = NXBOOT_SECONDARY_SLOT_NUM;
+              state->update = NXBOOT_TERTIARY_SLOT_NUM;     
+            }
+        }
+      else if (primary_header.crc == secondary_header.crc)
+        {
+          update = tertiary;
+          recovery = secondary;
+          update_header = &tertiary_header;
+          recovery_header = &secondary_header;
+          state->recovery = NXBOOT_SECONDARY_SLOT_NUM;
+          state->update = NXBOOT_TERTIARY_SLOT_NUM;     
         }
     }
-  else if (get_image_flag(tertiary, NXBOOT_CONFIRMED_PAGE_INDEX) &&
-           tertiary_header.crc == primary_header.crc &&
-           validate_image(tertiary))
+  else if (secondary_header.magic == NXBOOT_HEADER_MAGIC_INV)
+    {
+      update = tertiary;
+      recovery = secondary;
+      update_header = &tertiary_header;
+      recovery_header = &secondary_header;
+      state->recovery = NXBOOT_SECONDARY_SLOT_NUM;
+      state->update = NXBOOT_TERTIARY_SLOT_NUM;      
+    }
+
+  if (primary_header.crc == recovery_header->crc && validate_image(recovery))
     {
       state->recovery_valid = true;
     }
 
-  if (get_image_flag(primary, NXBOOT_CONFIRMED_PAGE_INDEX) ||
-      primary_header.magic == NXBOOT_HEADER_MAGIC_INV)
+  if (primary_header.magic == NXBOOT_HEADER_MAGIC ||
+      (primary_header.magic == NXBOOT_HEADER_MAGIC_INV &&
+      primary_header.crc == recovery_header->crc))
     {
       state->primary_confirmed = true;
     }
 
-  state->next_boot = get_update_type(primary, update, recovery,
-                                     &primary_header, update_header);
+  state->next_boot = get_update_type(state, primary, update, recovery,
+                                     &primary_header, update_header,
+                                     recovery_header);
 
+
+  syslog(LOG_INFO, "Primary header %lx\n", primary_header.magic);
+  syslog(LOG_INFO, "Update = %d, Recovery = %d, confirmed %d, valid %d, do %d\n", state->update, state->recovery,
+         state->primary_confirmed, state->recovery_valid, state->next_boot);
   flash_partition_close(primary);
   flash_partition_close(secondary);
   flash_partition_close(tertiary);
@@ -606,7 +624,12 @@ int nxboot_open_update_partition(void)
 int nxboot_get_confirm(void)
 {
   int primary;
+  int recovery;
+  int recovery_pointer;
+  char *path;
+  int ret = 0;
   struct nxboot_img_header primary_header;
+  struct nxboot_img_header recovery_header;
 
   primary = flash_partition_open(CONFIG_NXBOOT_PRIMARY_SLOT_PATH);
   if (primary < 0)
@@ -615,13 +638,41 @@ int nxboot_get_confirm(void)
     }
 
   get_image_header(primary, &primary_header);
-  if (get_image_flag(primary, NXBOOT_CONFIRMED_PAGE_INDEX) ||
-      primary_header.magic == NXBOOT_HEADER_MAGIC_INV)
+  
+  if (primary_header.magic == NXBOOT_HEADER_MAGIC)
     {
+      close(primary);
       return 1;
     }
+  else if (primary_header.magic == NXBOOT_HEADER_MAGIC_INV)
+    {
+      recovery_pointer = get_image_last_wp(primary);
+      if (recovery_pointer != 0xff)
+        {
+          recovery_pointer &= 0x3;
+          path = recovery_pointer == NXBOOT_SECONDARY_SLOT_NUM ?
+            CONFIG_NXBOOT_SECONDARY_SLOT_PATH :
+            CONFIG_NXBOOT_TERTIARY_SLOT_PATH;
 
-  return 0;
+          recovery = flash_partition_open(path);
+          if (recovery < 0)
+            {
+              close(primary);
+              return ERROR;
+            }
+          
+          get_image_header(recovery, &recovery_header);
+          if (primary_header.crc == recovery_header.crc)
+            {
+              ret = 1;
+            }
+
+          close(recovery);
+        }
+    }
+
+  close(primary);
+  return ret;
 }
 
 /****************************************************************************
@@ -641,16 +692,23 @@ int nxboot_confirm(void)
   int ret;
   int update;
   int primary;
-  int secondary;
-  int tertiary;
-  int recovery;
+  int remain;
+  int readsiz;
+  char *path;
+  char *buf;
+  off_t off;
   struct nxboot_state state;
+  struct flash_partition_info info_update;
 
+  ret = OK;
   nxboot_get_state(&state);
   if (state.primary_confirmed)
     {
       return OK;
     }
+
+  path = state.update == NXBOOT_SECONDARY_SLOT_NUM ?
+    CONFIG_NXBOOT_SECONDARY_SLOT_PATH : CONFIG_NXBOOT_TERTIARY_SLOT_PATH;
 
   primary = flash_partition_open(CONFIG_NXBOOT_PRIMARY_SLOT_PATH);
   if (primary < 0)
@@ -658,30 +716,11 @@ int nxboot_confirm(void)
       return ERROR;
     }
 
-  secondary = flash_partition_open(CONFIG_NXBOOT_SECONDARY_SLOT_PATH);
-  if (secondary < 0)
+  update = flash_partition_open(path);
+  if (update < 0)
     {
       flash_partition_close(primary);
       return ERROR;
-    }
-
-  tertiary = flash_partition_open(CONFIG_NXBOOT_TERTIARY_SLOT_PATH);
-  if (tertiary < 0)
-    {
-      flash_partition_close(primary);
-      flash_partition_close(secondary);
-      return ERROR;
-    }
-
-  if (state.update == NXBOOT_SECONDARY_SLOT_NUM)
-    {
-      update = secondary;
-      recovery = tertiary;
-    }
-  else
-    {
-      update = tertiary;
-      recovery = secondary;
     }
 
   /* We need to mark both primary and update partitions as confirmed
@@ -693,35 +732,43 @@ int nxboot_confirm(void)
    * flag.
    */
 
-  ret = OK;
-  if (set_image_flag(primary, NXBOOT_CONFIRMED_PAGE_INDEX) < 0)
+  if (flash_partition_info(update, &info_update) < 0)
     {
       ret = ERROR;
       goto confirm_done;
     }
 
-  if (set_image_flag(update, NXBOOT_CONFIRMED_PAGE_INDEX) < 0)
+  buf = malloc(info_update.blocksize);
+  remain = info_update.erasesize;
+  off = 0;
+
+  while (remain > 0)
     {
-      ret = ERROR;
-      goto confirm_done;
+      readsiz = remain > info_update.blocksize ?
+        info_update.blocksize : remain;
+      if (flash_partition_read(primary, buf, readsiz, off) < 0)
+        {
+          free(buf);
+          ret = ERROR;
+          goto confirm_done;
+        }
+
+      if (flash_partition_write(update, buf, readsiz, off) < 0)
+        {
+          free(buf);
+          ret = ERROR;
+          goto confirm_done;
+        }
+
+      off += readsiz;
+      remain -= readsiz;
     }
 
-  if (flash_partition_erase_last_sector(recovery) < 0)
-    {
-      ret = ERROR;
-      goto confirm_done;
-    }
-
-  if (set_image_flag(recovery, NXBOOT_UPDATED_PAGE_INDEX) < 0)
-    {
-      ret = ERROR;
-      goto confirm_done;
-    }
+  free(buf);
 
 confirm_done:
   flash_partition_close(primary);
-  flash_partition_close(secondary);
-  flash_partition_close(tertiary);
+  flash_partition_close(update);
 
   return ret;
 }
