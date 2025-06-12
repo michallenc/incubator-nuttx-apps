@@ -63,6 +63,7 @@ struct rhealstone_entry
 
 static const struct rhealstone_entry g_entry_list[] =
 {
+  {"Task Switching", task_switching},
   {"Semaphore Shuffle", semaphore_shuffle},
 };
 
@@ -92,7 +93,7 @@ static void rhealstone_run(const FAR struct rhealstone_entry *item,
  * Public Functions
  ****************************************************************************/
 
-int performance_thread_create(FAR void *(*entry)(FAR void *), FAR void *arg,
+int rhealstone_thread_create(FAR void *(*entry)(FAR void *), FAR void *arg,
                               int priority)
 {
   struct sched_param param;

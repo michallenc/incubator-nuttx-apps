@@ -28,7 +28,7 @@
  * Public Types
  ****************************************************************************/
 
- struct performance_time_s
+struct performance_time_s
 {
   clock_t start;
   clock_t end;
@@ -39,7 +39,7 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: performance_thread_create
+ * Name: rhealstone_thread_create
  *
  * Description:
  *   Creates the thread with SCHED_FIFO policy.
@@ -47,14 +47,14 @@
  * Input Parameters:
  *   entry - routine to be started
  *   arg - optional argument passed to the routine
- *   priority - priority of the routine 
+ *   priority - priority of the routine
  *
  * Returned Value:
  *   ID of the newly created thread.
  *
  ****************************************************************************/
 
-int performance_thread_create(FAR void *(*entry)(FAR void *), FAR void *arg,
+int rhealstone_thread_create(FAR void *(*entry)(FAR void *), FAR void *arg,
                               int priority);
 
 /****************************************************************************
@@ -101,8 +101,6 @@ size_t performance_gettime(FAR struct performance_time_s *result);
  * Name: semaphore_shuffle
  *
  * Description:
- *   Calculates the time between performance_start and performance_end
- *   calls.
  *
  * Input Parameters:
  *   count - number of times the test is performed
@@ -110,3 +108,15 @@ size_t performance_gettime(FAR struct performance_time_s *result);
  ****************************************************************************/
 
 size_t semaphore_shuffle(size_t count);
+
+/****************************************************************************
+ * Name: task_switching
+ *
+ * Description:
+ *
+ * Input Parameters:
+ *   count - number of times the test is performed
+ *
+ ****************************************************************************/
+
+size_t task_switching(size_t count);

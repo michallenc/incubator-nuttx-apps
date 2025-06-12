@@ -1,5 +1,5 @@
 /****************************************************************************
- * apps/benchmarks/rhealstone/semaphore.c
+ * apps/benchmarks/rhealstone/task.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -28,14 +28,12 @@
 #include <limits.h>
 #include <pthread.h>
 #include <sched.h>
-#include <semaphore.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdatomic.h>
 #include <sys/param.h>
 #include <sys/poll.h>
 
@@ -47,14 +45,11 @@
  * Private Types
  ****************************************************************************/
 
-struct semaphore_shuffle_s
+struct task_switch_s
 {
-  sem_t semaphore;
   int ntests;
-  atomic_uint count;
-  bool measure_semaphores;
 
-  size_t context_switch_overhead;
+  size_t loop_overhead;
   size_t measured_time;
 };
 
@@ -70,67 +65,38 @@ struct semaphore_shuffle_s
  * Private Functions
  ****************************************************************************/
 
-static FAR void *sem_task2(FAR void *arg)
+static FAR void *task2(FAR void *arg)
 {
-  struct semaphore_shuffle_s *priv = (struct semaphore_shuffle_s *)arg;
+  struct task_switch_s *priv = (struct task_switch_s *)arg;
   struct performance_time_s result;
   ssize_t elapsed;
 
   performance_start(&result);
-  for (priv->count = 0; priv->count < priv->ntests; priv->count++)
+  for (int i = 0; i < priv->ntests - 1; i++)
     {
-      if (priv->measure_semaphores)
-        {
-          sem_wait(&priv->semaphore);
-        }
-
-      sched_yield();
-      if (priv->measure_semaphores)
-        {
-          sem_post(&priv->semaphore);
-        }
-
       sched_yield();
     }
 
   performance_end(&result);
   elapsed = performance_gettime(&result);
-  if (!priv->measure_semaphores)
-    {
-      priv->context_switch_overhead = elapsed;
-    }
-  else
-    {
-      priv->measured_time = (elapsed - priv->context_switch_overhead) /
-                            (priv->ntests * 2);
-    }
+  priv->measured_time = (elapsed - priv->loop_overhead) /
+                        ((priv->ntests * 2) - 1);
 
   return NULL;
 }
 
-static FAR void *sem_task1(FAR void *arg)
+static FAR void *task1(FAR void *arg)
 {
-  struct semaphore_shuffle_s *priv = (struct semaphore_shuffle_s *)arg;
+  struct task_switch_s *priv = (struct task_switch_s *)arg;
   pthread_t task;
 
-  task = rhealstone_thread_create(sem_task2, arg,
-                                   CONFIG_BENCHMARK_RHEALSTONE_PRIORITY + 1);
+  task = rhealstone_thread_create(task2, arg,
+          CONFIG_BENCHMARK_RHEALSTONE_PRIORITY + 1);
 
   sched_yield();
 
-  while (priv->count < priv->ntests)
+  for (int i = 0; i < priv->ntests; i++)
     {
-      if (priv->measure_semaphores)
-        {
-          sem_wait(&priv->semaphore);
-        }
-
-      sched_yield();
-      if (priv->measure_semaphores)
-        {
-          sem_post(&priv->semaphore);
-        }
-
       sched_yield();
     }
 
@@ -142,27 +108,24 @@ static FAR void *sem_task1(FAR void *arg)
  * Public Functions
  ****************************************************************************/
 
-size_t semaphore_shuffle(size_t count)
+size_t task_switching(size_t count)
 {
+  struct performance_time_s result;
   pthread_t task;
 
-  struct semaphore_shuffle_s priv =
+  struct task_switch_s priv =
     {
-      .measure_semaphores = false,
       .ntests = count,
     };
 
-  sem_init(&priv.semaphore, 0, 1);
+  performance_start(&result);
+  for (int i = 0; i < priv.ntests - 1; i++);
+  for (int i = 0; i < priv.ntests; i++);
+  performance_end(&result);
+  priv.loop_overhead = performance_gettime(&result);
 
-  task = rhealstone_thread_create(sem_task1, &priv,
-                                   CONFIG_BENCHMARK_RHEALSTONE_PRIORITY + 1);
+  task = rhealstone_thread_create(task1, &priv,
+                                  CONFIG_BENCHMARK_RHEALSTONE_PRIORITY + 1);
   pthread_join(task, NULL);
-
-  priv.measure_semaphores = true;
-  priv.count = 0;
-  task = rhealstone_thread_create(sem_task1, &priv,
-                                   CONFIG_BENCHMARK_RHEALSTONE_PRIORITY + 1);
-  pthread_join(task, NULL);
-  sem_destroy(&priv.semaphore);
   return priv.measured_time;
 }
