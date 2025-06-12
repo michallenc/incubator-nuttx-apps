@@ -1,0 +1,22 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config BENCHMARK_RHEALSTONE
+	tristate "Rhealstone benchmarks for NuttX"
+	default n
+	---help---
+		TODO
+
+if BENCHMARK_RHEALSTONE
+
+config BENCHMARK_RHEALSTONE_PRIORITY
+	int "Rhealstone benchmark task priority"
+	default 100
+
+config BENCHMARK_RHEALSTONE_STACKSIZE
+	int "Rhealstone benchmark stack size"
+	default DEFAULT_TASK_STACKSIZE
+
+endif
