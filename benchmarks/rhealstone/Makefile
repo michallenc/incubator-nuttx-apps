@@ -29,6 +29,7 @@ MODULE    = $(CONFIG_BENCHMARK_RHEALSTONE)
 
 MAINSRC = rhealstone.c
 
-CSRCS := semaphore.c
+CSRCS := semaphore.c \
+				 task.c
 
 include $(APPDIR)/Application.mk
