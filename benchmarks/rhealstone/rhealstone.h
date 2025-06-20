@@ -120,3 +120,15 @@ size_t semaphore_shuffle(size_t count);
  ****************************************************************************/
 
 size_t task_switching(size_t count);
+
+/****************************************************************************
+ * Name: task_preempt
+ *
+ * Description:
+ *
+ * Input Parameters:
+ *   count - number of times the test is performed
+ *
+ ****************************************************************************/
+
+size_t task_preempt(size_t count);

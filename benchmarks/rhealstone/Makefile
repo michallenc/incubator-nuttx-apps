@@ -30,6 +30,7 @@ MODULE    = $(CONFIG_BENCHMARK_RHEALSTONE)
 MAINSRC = rhealstone.c
 
 CSRCS := semaphore.c \
-				 task.c
+         task_switch.c \
+         task_preempt.c
 
 include $(APPDIR)/Application.mk
