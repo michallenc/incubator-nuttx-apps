@@ -1,5 +1,5 @@
 /****************************************************************************
- * apps/benchmarks/rhealstone/task.c
+ * apps/benchmarks/rhealstone/task_preempt.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -45,11 +45,15 @@
  * Private Types
  ****************************************************************************/
 
-struct task_switch_s
+struct task_preempt_s
 {
   int ntests;
+  pthread_cond_t cond;
+  pthread_mutex_t mutex;
+  struct performance_time_s result;
 
   size_t loop_overhead;
+  size_t switch_overhead;
   size_t measured_time;
 };
 
@@ -67,37 +71,49 @@ struct task_switch_s
 
 static FAR void *task2(FAR void *arg)
 {
-  struct task_switch_s *priv = (struct task_switch_s *)arg;
+  struct task_preempt_s *priv = (struct task_preempt_s *)arg;
   struct performance_time_s result;
   ssize_t elapsed;
 
-  performance_start(&result);
+  performance_start(&priv->result);
+  pthread_mutex_lock(&priv->mutex);
+  pthread_cond_wait(&priv->cond, &priv->mutex);
+  pthread_mutex_unlock(&priv->mutex);
+
   for (int i = 0; i < priv->ntests - 1; i++)
     {
-      sched_yield();
+      pthread_mutex_lock(&priv->mutex);
+      pthread_cond_wait(&priv->cond, &priv->mutex);
+      pthread_mutex_unlock(&priv->mutex);
     }
 
   performance_end(&result);
   elapsed = performance_gettime(&result);
-  priv->measured_time = (elapsed - priv->loop_overhead) /
-                        ((priv->ntests * 2) - 1);
+  printf("elapes %ld, loop %ld, switch %ld\n", elapsed, priv->loop_overhead, priv->switch_overhead);
+  priv->measured_time = ((elapsed - priv->loop_overhead)
+                         / (priv->ntests - 1)) - priv->switch_overhead;
 
   return NULL;
 }
 
 static FAR void *task1(FAR void *arg)
 {
-  struct task_switch_s *priv = (struct task_switch_s *)arg;
+  struct task_preempt_s *priv = (struct task_preempt_s *)arg;
   pthread_t task;
 
   task = rhealstone_thread_create(task2, arg,
-          CONFIG_BENCHMARK_RHEALSTONE_PRIORITY + 1);
+          CONFIG_BENCHMARK_RHEALSTONE_PRIORITY + 2);
 
-  sched_yield();
+  performance_end(&priv->result);
+  priv->switch_overhead = performance_gettime(&priv->result);
+
+  performance_start(&priv->result);
 
   for (int i = 0; i < priv->ntests; i++)
     {
-      sched_yield();
+      pthread_mutex_lock(&priv->mutex);
+      pthread_cond_signal(&priv->cond);
+      pthread_mutex_unlock(&priv->mutex);
     }
 
   pthread_join(task, NULL);
@@ -108,24 +124,28 @@ static FAR void *task1(FAR void *arg)
  * Public Functions
  ****************************************************************************/
 
-size_t task_switching(size_t count)
+size_t task_preempt(size_t count)
 {
   struct performance_time_s result;
   pthread_t task;
 
-  struct task_switch_s priv =
+  struct task_preempt_s priv =
     {
       .ntests = count,
     };
 
+  pthread_cond_init(&priv.cond, NULL);
+  pthread_mutex_init(&priv.mutex, NULL);
+
   performance_start(&result);
-  for (int i = 0; i < priv.ntests - 1; i++);
-  for (int i = 0; i < priv.ntests; i++);
+  for (int i = 0; i < (priv.ntests * 2) - 1; i++);
   performance_end(&result);
   priv.loop_overhead = performance_gettime(&result);
-
+  
   task = rhealstone_thread_create(task1, &priv,
                                   CONFIG_BENCHMARK_RHEALSTONE_PRIORITY + 1);
   pthread_join(task, NULL);
+  pthread_cond_destroy(&priv.cond);
+  pthread_mutex_destroy(&priv.mutex);
   return priv.measured_time;
 }

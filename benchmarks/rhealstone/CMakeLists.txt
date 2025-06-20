@@ -21,7 +21,7 @@
 # ##############################################################################
 
 if(CONFIG_BENCHMARK_RHEALSTONE)
-  set(SRCS semaphore.c task.c)
+  set(SRCS semaphore.c task_switch.c task_preempt.c)
 
   nuttx_add_application(
     NAME

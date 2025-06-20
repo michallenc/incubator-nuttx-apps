@@ -64,6 +64,7 @@ struct rhealstone_entry
 static const struct rhealstone_entry g_entry_list[] =
 {
   {"Task Switching", task_switching},
+  {"Preemption Time", task_preempt},
   {"Semaphore Shuffle", semaphore_shuffle},
 };
 
