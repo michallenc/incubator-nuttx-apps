@@ -139,7 +139,10 @@ static int copy_partition(int from, int where, struct nxboot_state *state,
   int blocksize;
   off_t off;
   char *buf;
-#ifdef CONFIG_NXBOOT_PRINTF_PROGRESS_PERCENT  
+#ifndef CONFIG_NXBOOT_PARTITIONS_USE_FTL
+  int sectors_to_erase;
+#endif
+#ifdef CONFIG_NXBOOT_PRINTF_PROGRESS_PERCENT
   int total_size;
 #endif
 
@@ -161,11 +164,33 @@ static int copy_partition(int from, int where, struct nxboot_state *state,
       return ERROR;
     }
 
+#ifndef CONFIG_NXBOOT_PARTITIONS_USE_FTL
+  /* Erase pages from the target if FTL layer is not used. Direct access
+   * with MTD layer doesn't erase page before writing it, therefore the
+   * application has to handle it. We know the size of the image, thus
+   * we can erase all sectors that bootloader will write into.
+   */
+
+  sectors_to_erase = (remain / info_where.erasesize);
+  if (remain % info_where.erasesize != 0)
+    {
+      sectors_to_erase += 1;
+    }
+
+  if (flash_partition_erase_sectors(where, 0, sectors_to_erase) < 0)
+    {
+      return ERROR;
+    }
+#endif
+
 #ifdef CONFIG_NXBOOT_PRINTF_PROGRESS_PERCENT
   total_size = remain * 100;
 #endif
-  blocksize = MAX(info_from.blocksize, info_where.blocksize);
+  /* Set blocksize to the target partition's write page size to optimize
+   * write operation.
+   */
 
+  blocksize = info_where.blocksize;
   buf = malloc(blocksize);
   if (!buf)
     {
@@ -448,7 +473,7 @@ static int perform_update(struct nxboot_state *state, bool check_only)
                * confirmation.
                */
 
-              flash_partition_erase_first_sector(update);
+              flash_partition_erase_sectors(update, 0, 1);
             }
 
           nxboot_progress(nxboot_progress_end);

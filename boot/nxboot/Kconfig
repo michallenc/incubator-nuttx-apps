@@ -52,6 +52,17 @@ config NXBOOT_PLATFORM_IDENTIFIER
 		(or even a firmware uploaded via a programmer) is rejected if the
 		value in image's header doesn't match this option.
 
+config NXBOOT_PARTITIONS_USE_FTL
+	bool "Partitions are accessed with FTL layer"
+	default y
+	---help---
+		This options determine whether FTL layer is used to access the
+		underlying flash partition. If not selected, the access is
+		directly to raw flash and bootloader has to manually erase pages
+		before writing to them. Selecting this option may increase the
+		memory consumption and slow up the update process (unless BCH
+		layer with write buffer is selected as well).
+
 config NXBOOT_BOOTLOADER
 	bool "Build nxboot bootloader application"
 	default n
@@ -83,7 +94,7 @@ config NXBOOT_RAMSTART
 		This will be board specific. A check of the board's linker script
 		may be informative. For example the SAMA5D2-XULT eval board's uboot
 		linker script - boards/arm/sama5/sama5d2-xult/scripts/uboot.ld - has:
-		
+
 		sdram (W!RX) : ORIGIN = 0x20008000, LENGTH = 256M - 32K
 
 		This shows the load address to be 0x20008000 and would be the address

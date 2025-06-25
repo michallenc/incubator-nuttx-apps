@@ -136,20 +136,23 @@ int flash_partition_read(int fd, void *buf, size_t count, off_t off);
 int flash_partition_erase(int fd);
 
 /****************************************************************************
- * Name: flash_partition_erase_first_sector
+ * Name: flash_partition_erase_sectors
  *
  * Description:
- *   Erases the first sector of the partition
+ *   Erases the sectors from the partition
  *
  * Input parameters:
- *   fd: Valid file descriptor.
+ *   fd:   Valid file descriptor.
+ *   from: The first sector where erase starts.
+ *   num:  Number of sectors to be erased.
+ *
  *
  * Returned Value:
  *   0 on success, -1 on failure.
  *
  ****************************************************************************/
 
-int flash_partition_erase_first_sector(int fd);
+int flash_partition_erase_sectors(int fd, int from, int num);
 
 /****************************************************************************
  * Name: flash_partition_info

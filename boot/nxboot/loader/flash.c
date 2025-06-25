@@ -240,26 +240,29 @@ int flash_partition_erase(int fd)
 }
 
 /****************************************************************************
- * Name: flash_partition_erase_first_sector
+ * Name: flash_partition_erase_sectors
  *
  * Description:
- *   Erases the first sector of the partition
+ *   Erases the sectors from the partition
  *
  * Input parameters:
- *   fd: Valid file descriptor.
+ *   fd:   Valid file descriptor.
+ *   from: The first sector where erase starts.
+ *   num:  Number of sectors to be erased.
+ *
  *
  * Returned Value:
  *   0 on success, -1 on failure.
  *
  ****************************************************************************/
 
-int flash_partition_erase_first_sector(int fd)
+int flash_partition_erase_sectors(int fd, int from, int num)
 {
   int ret;
   struct mtd_erase_s erase;
 
-  erase.startblock = 0;
-  erase.nblocks = 1;
+  erase.startblock = from;
+  erase.nblocks = num;
 
   ret = ioctl(fd, MTDIOC_ERASESECTORS, &erase);
   if (ret < 0)
