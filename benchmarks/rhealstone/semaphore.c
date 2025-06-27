@@ -24,14 +24,11 @@
  * Included Files
  ****************************************************************************/
 
-#include <assert.h>
-#include <limits.h>
 #include <pthread.h>
 #include <sched.h>
 #include <semaphore.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

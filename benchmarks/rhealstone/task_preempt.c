@@ -24,13 +24,10 @@
  * Included Files
  ****************************************************************************/
 
-#include <assert.h>
-#include <limits.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -89,7 +86,6 @@ static FAR void *task2(FAR void *arg)
 
   performance_end(&result);
   elapsed = performance_gettime(&result);
-  printf("elapes %ld, loop %ld, switch %ld\n", elapsed, priv->loop_overhead, priv->switch_overhead);
   priv->measured_time = ((elapsed - priv->loop_overhead)
                          / (priv->ntests - 1)) - priv->switch_overhead;
 
