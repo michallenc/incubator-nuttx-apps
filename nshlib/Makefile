@@ -71,6 +71,7 @@ ifeq ($(CONFIG_NSH_CONSOLE),y)
 CSRCS += nsh_consolemain.c
 endif
 
+
 ifneq ($(CONFIG_NSH_DISABLE_PRINTF),y)
 CSRCS += nsh_printf.c
 endif
@@ -88,10 +89,6 @@ endif
 
 ifneq ($(CONFIG_NSH_DISABLE_WAIT),y)
 CSRCS += nsh_wait.c
-endif
-
-ifeq ($(CONFIG_USBDEV),y)
-CSRCS += nsh_usbconsole.c
 endif
 
 ifeq ($(CONFIG_NSH_ALTCONDEV),y)
