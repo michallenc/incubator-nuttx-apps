@@ -93,7 +93,7 @@ static int nsh_nullstdio(void)
 
   /* Open /dev/null for read/write access */
 
-  fd = open("/dev/null", O_RDWR);
+  fd = open("/dev/console", O_RDWR);
   if (fd >= 0)
     {
       /* Configure standard I/O to use /dev/null */
@@ -123,7 +123,7 @@ static int nsh_nullstdio(void)
  *
  ****************************************************************************/
 
-static int nsh_waitusbready(FAR struct console_stdio_s *pstate)
+static int nsh_waitusbready(void)
 {
   char inch;
   ssize_t nbytes;
@@ -144,6 +144,7 @@ restart:
     {
       /* Try to open the console */
 
+	  printf("condev = %s\n", CONFIG_NSH_USBCONDEV);
       fd = open(CONFIG_NSH_USBCONDEV, O_RDWR);
       if (fd < 0)
         {
@@ -160,59 +161,60 @@ restart:
     }
   while (fd < 0);
 
+  /* Configure standard I/O */
+
+  nsh_configstdio(fd);
+
   /* Now wait until we successfully read a carriage return a few times.
    * That is a sure way of know that there is something at the other end of
    * the USB serial connection that is ready to talk with us.  The user needs
    * to hit ENTER a few times to get things started.
    */
 
-  nlc = 0;
-  do
-    {
-      /* Read one byte */
+ // nlc = 0;
+ // do
+ //   {
+ //     /* Read one byte */
 
-      inch = 0;
-      nbytes = read(fd, &inch, 1);
+ //     inch = 0;
+ //     nbytes = read(fd, &inch, 1);
 
-      /* Is it a carriage return (or maybe a newline)? */
+ //     /* Is it a carriage return (or maybe a newline)? */
 
-      if (nbytes == 1 && (inch == '\n' || inch == '\r'))
-        {
-          /* Yes.. increment the count */
+ //     if (nbytes == 1 && (inch == '\n' || inch == '\r'))
+ //       {
+ //         /* Yes.. increment the count */
 
-          nlc++;
-        }
-      else
-        {
-          /* No.. Reset the count.  We need to see 3 in a row to continue. */
+ //         nlc++;
+ //       }
+ //     else
+ //       {
+ //         /* No.. Reset the count.  We need to see 3 in a row to continue. */
 
-          nlc = 0;
+ //         nlc = 0;
 
-          /* If a read error occurred (nbytes < 0) or an end-of-file was
-           * encountered (nbytes == 0), then close the driver and start
-           * over.
-           */
+ //         /* If a read error occurred (nbytes < 0) or an end-of-file was
+ //          * encountered (nbytes == 0), then close the driver and start
+ //          * over.
+ //          */
 
-          if (nbytes <= 0)
-            {
-              close(fd);
-              goto restart;
-            }
-        }
-    }
-  while (nlc < 3);
+ //         if (nbytes <= 0)
+ //           {
+ //             close(fd);
+ //             goto restart;
+ //           }
+ //       }
+ //   }
+ // while (nlc < 3);
 
-  /* Configure standard I/O */
-
-  nsh_configstdio(fd);
-
-  /* We can close the original file descriptor (unless it was one of 0-2) */
+ // /* We can close the original file descriptor (unless it was one of 0-2) */
 
   if (fd > 2)
     {
       close(fd);
     }
 
+  //close(fd);
   return OK;
 }
 
@@ -230,19 +232,21 @@ static FAR void *nsh_usbconsole_thread(FAR void *arg)
        * standard I/O to the USB serial device.
        */
 
-      ret = nsh_waitusbready(args->pstate);
+      ret = nsh_waitusbready();
       UNUSED(ret); /* Eliminate warning if not used */
       DEBUGASSERT(ret == OK);
 
       /* Execute the session */
 
-      nsh_session(args->pstate, NSH_LOGIN_LOCAL, args->argc, args->argv);
+	  FAR struct console_stdio_s *pstate = nsh_newconsole(true);
+      nsh_session(pstate, NSH_LOGIN_LOCAL, args->argc, args->argv);
 
       /* Switch to /dev/null because we probably no longer have a
        * valid console device.
        */
 
-      nsh_nullstdio();
+	  nsh_release(&pstate->cn_vtbl);
+      //nsh_nullstdio();
     }
 
   return NULL;
@@ -280,12 +284,9 @@ int nsh_consolemain(int argc, FAR char *argv[])
 {
   int ret;
 #ifdef HAVE_USB_CONSOLE
-  FAR struct console_stdio_s *pstate_usb = nsh_newconsole(true);
   struct boardioc_usbdev_ctrl_s ctrl;
   FAR void *handle;
   pthread_t usb_tid;
-
-  DEBUGASSERT(pstate_usb);
 
   /* Initialize the USB serial driver */
 
@@ -337,7 +338,6 @@ int nsh_consolemain(int argc, FAR char *argv[])
 
   struct console_thread_args args =
     {
-      .pstate = pstate_usb,
 	  .argc = argc,
 	  .argv = argv,
     };
